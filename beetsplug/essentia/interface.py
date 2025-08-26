@@ -312,9 +312,11 @@ class EssentiaInterface:
 
                 if  1 - p.confidence <= model.config['threshold'].get(float):
                     if 'mood' in item and item['mood']:
-                        item_moods = self._config['tags']['mood']['separator'].get(str).join(sorted(set(item['mood'].split(';')) | p.moods))
-                        if len(item_moods) == 0:
-                            self._log(f'[Mood][MATCH][{item.path.decode('utf-8')}] {p.name} / {item['mood']} == {item_moods} {p.confidence:.4f}')
+                        existing_list = item['mood'].split(';')
+                        item_moods_list = sorted(set(existing_list) | p.moods)
+                        item_moods = self._config['tags']['mood']['separator'].get(str).join(item_moods_list)
+                        if len(item_moods_list) == len(existing_list):
+                            self._log(f'[Mood][SKIP][{item.path.decode('utf-8')}] {p.name} / {item['mood']} == {item_moods} {p.confidence:.4f}')
                         else:
                             self._log(f'[Mood][APPEND][{item.path.decode('utf-8')}] {p.name} / {item['mood']} +> {item_moods} {p.confidence:.4f}')
                             item['mood'] = item_moods
