@@ -219,7 +219,6 @@ class EssentiaInterface:
             audio = loader()
             embedding = model.embed(audio)
             predictions = [entry[0] for entry in model.analyse(embedding)]
-            self._log(f'Things {predictions}')
             confidence = sum(predictions) / len(predictions)
 
             if  1 - confidence <= model.config['threshold'].get(float):
