@@ -8,7 +8,7 @@ path: auto
 tags:
   bpm:
     enabled: yes
-    threshold: 0.1
+    threshold: 0.5
     model: "tempo/tempocnn/deeptemp-k16-3"
   mood:
     enabled: yes
@@ -17,39 +17,39 @@ tags:
     force_overwrite: no
     moods:
       aggressive:
-        enabled: yes
+        enabled: no
         threshold: 0.1
         mapping:
           - aggressive
         model: "classification-heads/mood_aggressive/mood_aggressive-discogs-effnet-1"
       happy:
-        enabled: yes
+        enabled: no
         threshold: 0.1
         mapping:
           - happy
         model: "classification-heads/mood_happy/mood_happy-discogs-effnet-1"
       party:
-        enabled: yes
+        enabled: no
         threshold: 0.1
         mapping:
           - party
         model: "classification-heads/mood_party/mood_party-discogs-effnet-1"
       relaxed:
-        enabled: yes
+        enabled: no
         threshold: 0.1
         mapping:
           - relaxed
         model: "classification-heads/mood_relaxed/mood_relaxed-discogs-effnet-1"
       sad:
-        enabled: yes
+        enabled: no
         threshold: 0.1
         mapping:
           - sad
         model: "classification-heads/mood_sad/mood_sad-discogs-effnet-1"
       mirex:
         enabled: no
-        threshold: 0.1
-        model: "classification-heads/mood_mirex/moods_mirex-msd-musicnn-1"
+        threshold: 0.5
+        model: "classification-heads/moods_mirex/moods_mirex-msd-musicnn-1"
         mapping:
           category_1:
             - passionate
@@ -88,43 +88,43 @@ tags:
             #- volatile
             #- visceral
       jamendo:
-        enabled: no
-        threshold: 0.1
+        enabled: yes
+        threshold: 0.9
         model: "classification-heads/mtg_jamendo_moodtheme/mtg_jamendo_moodtheme-discogs_track_embeddings-effnet-1"
         mapping:
-          #action:
+          action:
           #  - action
-          #adventure:
+          adventure:
           #  - adventure
-          #advertising:
+          advertising:
           #  - advertising
-          #background:
+          background:
           #  - background
-          #ballad:
+          ballad:
           #  - ballad
           calm:
             - calm
-          #children:
+          children:
           #  - children
-          #christmas:
+          christmas:
           #  - christmas
-          #commercial:
+          commercial:
           #  - commercial
           cool:
             - cool
-          #corporate:
+          corporate:
           #  - corporate
           dark:
             - dark
           deep:
             - deep
-          #documentary:
+          documentary:
           #  - documentary
-          #drama:
+          drama:
           #  - drama
           dramatic:
             - dramatic
-          #dream:
+          dream:
           #  - dream
           emotional:
             - emotional
@@ -134,13 +134,13 @@ tags:
             - epic
           fast:
             - fast
-          #film:
+          film:
           #  - film
-          #fun:
+          fun:
           #  - fun
           funny:
             - funny
-          #game:
+          game:
           #  - game
           groovy:
             - groovy
@@ -148,13 +148,13 @@ tags:
             - happy
           heavy:
             - heavy
-          #holiday:
+          holiday:
           #  - holiday
           hopeful:
             - hopeful
           inspiring:
             - inspiring
-          #love:
+          love:
           #  - love
           meditative:
             - meditative
@@ -164,9 +164,9 @@ tags:
             - melodic
           motivational:
             - motivational
-          #movie:
+          movie:
           #  - movie
-          #nature:
+          nature:
           #  - nature
           party:
             - party
@@ -176,7 +176,7 @@ tags:
             - powerful
           relaxing:
             - relaxing
-          #retro:
+          retro:
           #  - retro
           romantic:
             - romantic
@@ -188,17 +188,17 @@ tags:
             - slow
           soft:
             - soft
-          #soundscape:
+          soundscape:
           #  - soundscape
-          #space:
+          space:
           #  - space
-          #sport:
+          sport:
           #  - sport
-          #summer:
+          summer:
           #  - summer
-          #trailer:
+          trailer:
           #  - trailer
-          #travel:
+          travel:
           #  - travel
           upbeat:
             - upbeat

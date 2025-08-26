@@ -133,39 +133,39 @@ essentia:
           mapping:
             # the jamendo model handles not only moods, but also themes
             # by default only the moods are stored in the mood tag
-            #action:
+            action:
             #  - action
-            #adventure:
+            adventure:
             #  - adventure
-            #advertising:
+            advertising:
             #  - advertising
-            #background:
+            background:
             #  - background
-            #ballad:
+            ballad:
             #  - ballad
             calm:
               - calm
-            #children:
+            children:
             #  - children
-            #christmas:
+            christmas:
             #  - christmas
-            #commercial:
+            commercial:
             #  - commercial
             cool:
               - cool
-            #corporate:
+            corporate:
             #  - corporate
             dark:
               - dark
             deep:
               - deep
-            #documentary:
+            documentary:
             #  - documentary
-            #drama:
+            drama:
             #  - drama
             dramatic:
               - dramatic
-            #dream:
+            dream:
             #  - dream
             emotional:
               - emotional
@@ -175,13 +175,13 @@ essentia:
               - epic
             fast:
               - fast
-            #film:
+            film:
             #  - film
-            #fun:
+            fun:
             #  - fun
             funny:
               - funny
-            #game:
+            game:
             #  - game
             groovy:
               - groovy
@@ -189,13 +189,13 @@ essentia:
               - happy
             heavy:
               - heavy
-            #holiday:
+            holiday:
             #  - holiday
             hopeful:
               - hopeful
             inspiring:
               - inspiring
-            #love:
+            love:
             #  - love
             meditative:
               - meditative
@@ -205,9 +205,9 @@ essentia:
               - melodic
             motivational:
               - motivational
-            #movie:
+            movie:
             #  - movie
-            #nature:
+            nature:
             #  - nature
             party:
               - party
@@ -217,7 +217,7 @@ essentia:
               - powerful
             relaxing:
               - relaxing
-            #retro:
+            retro:
             #  - retro
             romantic:
               - romantic
@@ -229,17 +229,17 @@ essentia:
               - slow
             soft:
               - soft
-            #soundscape:
+            soundscape:
             #  - soundscape
-            #space:
+            space:
             #  - space
-            #sport:
+            sport:
             #  - sport
-            #summer:
+            summer:
             #  - summer
-            #trailer:
+            trailer:
             #  - trailer
-            #travel:
+            travel:
             #  - travel
             upbeat:
               - upbeat

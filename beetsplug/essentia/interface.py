@@ -12,7 +12,7 @@ from typing import Any, Callable
 
 import numpy as np
 from beets.library import Item
-from confuse import ConfigView, Subview, AttrDict
+from confuse import ConfigView, Subview, AttrDict, ConfigTypeError
 
 import essentia.standard as es
 
@@ -162,9 +162,16 @@ class MoodModelType(Enum):
     jamendo = 'jamendo'
 
 class MoodPrediction:
-    def __init__(self, moods: set[str], confidence: float):
+    def __init__(self, moods: set[str], confidence: float, mtype: MoodModelType):
         self.confidence = confidence
         self.moods = moods
+        self.name = self._get_name(mtype)
+
+    def _get_name(self, mtype: MoodModelType) -> str:
+        if mtype == MoodModelType.mirex or mtype == MoodModelType.jamendo:
+            return f'{mtype.name}+{next(iter(self.moods))}'
+
+        return mtype.name
 
     def __repr__(self) -> str:
         return f'{self.moods} / {self.confidence}'
@@ -181,31 +188,34 @@ class MoodModel(EssentiaModel):
             name: str
     ):
         super().__init__(log, mpath, config, name)
-        self.model_type = MoodModelType[self.name]
+        self.model_type = MoodModelType(self.name)
         self._moods = self._get_moods()
 
-    def _get_moods(self) -> list[set[str]] | set[str]:
-        if self.model_type == MoodModelType.mirex:
-            return [set(m.get() for m in mood.sequence()) for category, mood in sorted(self.config['mapping'].items(), key=lambda t: t[0])]
-        if self.model_type == MoodModelType.jamendo:
-            return [set(m.get() for m in mood.sequence()) for category, mood in sorted(self.config['mapping'].items(), key=lambda t: t[0])]
+    def _get_moods(self) -> list[list[str|None]] | set[str]:
+        if self.model_type == MoodModelType.mirex or self.model_type == MoodModelType.jamendo:
+            moods = []
+            mappings = [mood for category, mood in sorted(self.config['mapping'].items(), key=lambda t: t[0])]
+            for mapping in mappings:
+                try:
+                    moods.append([m.get() for m in mapping.sequence()])
+                except ConfigTypeError:
+                    moods.append(None)
+            return moods
 
         return set(mood.get() for mood in self.config['mapping'].sequence())
 
     def analyze(self, embedding) -> list[MoodPrediction]:
         predictions = super().analyze(embedding)
 
-        if self.model_type == MoodModelType.mirex:
+        if self.model_type == MoodModelType.mirex or self.model_type == MoodModelType.jamendo:
             sum_count = len(predictions)
             sum_categories = np.array(predictions).sum(axis=0)
             category_confidence = [i / sum_count for i in sum_categories]
-            return [MoodPrediction(moods, category_confidence[idx]) for idx, moods in enumerate(self._moods)]
-        if self.model_type == MoodModelType.jamendo:
-            return []
+            return [MoodPrediction(set(moods), category_confidence[idx], self.model_type) for idx, moods in enumerate(self._moods) if moods is not None]
 
         predictions_positive = [entry[0] for entry in predictions]
         confidence = sum(predictions_positive) / len(predictions_positive)
-        return [MoodPrediction(self._moods, confidence)]
+        return [MoodPrediction(self._moods, confidence, self.model_type)]
 
 
 class EssentiaInterface:
@@ -297,19 +307,23 @@ class EssentiaInterface:
             predictions = model.analyze(embedding)
 
             for p in predictions:
+                if len(p.moods) == 0:
+                    continue
+
                 if  1 - p.confidence <= model.config['threshold'].get(float):
                     if 'mood' in item and item['mood']:
-                        item_moods = set(item['mood'].split(';')) ^ p.moods
+                        item_moods = self._config['tags']['mood']['separator'].get(str).join(sorted(set(item['mood'].split(';')) | p.moods))
                         if len(item_moods) == 0:
-                            self._log(f'[Mood][MATCH][{item.path.decode('utf-8')}] {model.model_metadata['name']} / {item['mood']} == {item_moods} {p.confidence:.4f}')
+                            self._log(f'[Mood][MATCH][{item.path.decode('utf-8')}] {p.name} / {item['mood']} == {item_moods} {p.confidence:.4f}')
                         else:
-                            self._log(f'[Mood][APPEND][{item.path.decode('utf-8')}] {model.model_metadata['name']} / {item['mood']} +> {item_moods} {p.confidence:.4f}')
-                            item['mood'] = f'{item['mood']}{self._config['tags']['mood']['separator']}{';'.join(sorted(item_moods))}'
+                            self._log(f'[Mood][APPEND][{item.path.decode('utf-8')}] {p.name} / {item['mood']} +> {item_moods} {p.confidence:.4f}')
+                            item['mood'] = item_moods
                     else:
-                        self._log(f'[Mood][ADD][{item.path.decode('utf-8')}] {model.model_metadata['name']} +> {p.moods} / {p.confidence:.4f}')
-                        item['mood'] = ';'.join(sorted(p.moods))
+                        item_moods = self._config['tags']['mood']['separator'].get(str).join(sorted(p.moods))
+                        self._log(f'[Mood][ADD][{item.path.decode('utf-8')}] {p.name} +> {item_moods} / {p.confidence:.4f}')
+                        item['mood'] = item_moods
                 else:
-                    self._log(f'[Mood][THRESHOLD][{item.path.decode('utf-8')}] {model.model_metadata['name']} / {p.confidence:.4f}')
+                    self._log(f'[Mood][THRESHOLD][{item.path.decode('utf-8')}] {p.name} / {p.confidence:.4f}')
 
     def _analyse_item(self, item: Item) -> None:
         if not path.isfile(item.path):
