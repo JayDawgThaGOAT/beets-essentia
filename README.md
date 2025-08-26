@@ -1,19 +1,12 @@
-[![Test & Release & Deploy](https://github.com/adamjakab/BeetsPluginXtractor/actions/workflows/test_release_deploy.yml/badge.svg)](https://github.com/adamjakab/BeetsPluginXtractor/actions/workflows/test_release_deploy.yml)
-[![Coverage Status](https://coveralls.io/repos/github/adamjakab/BeetsPluginXtractor/badge.svg?branch=master)](https://coveralls.io/github/adamjakab/BeetsPluginXtractor?branch=master)
-[![PyPi](https://img.shields.io/pypi/v/beets-xtractor.svg)](https://pypi.org/project/beets-xtractor/)
-[![PyPI pyversions](https://img.shields.io/pypi/pyversions/beets-xtractor.svg)](https://pypi.org/project/beets-xtractor/)
 [![MIT license](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.txt)
 
-# Xtractor (Beets Plugin)
+# beets-essentia Plugin
 
-The _beets-xtractor_ plugin lets you, through the use of the [Essentia](https://essentia.upf.edu/index.html) extractors,
-to obtain low and high level musical information from your songs.
+The _beets-essentia_ plugin lets you, through the use of the [Essentia](https://essentia.upf.edu/index.html) tensorflow models,
+obtain low and high level musical information from your songs.
 
-Currently, the following attributes are extracted for each library item:
-`bpm`, `danceability`, `beats_count`, `average_loudness`, `danceable`, `gender`, `is_male`, `is_female`,
-`genre_rosamerica`, `voice_instrumental`, `is_voice`, `is_instrumental`, `mood_acoustic`,
-`mood_aggressive`, `mood_electronic`, `mood_happy`, `mood_sad`, `mood_party`, `mood_relaxed`, `mood_mirex`,
-`mood_mirex_cluster_1`, `mood_mirex_cluster_2`, `mood_mirex_cluster_3`, `mood_mirex_cluster_4`, `mood_mirex_cluster_5`
+Currently, the following tags are extracted and applied for each library item:
+`bpm`, `mood`
 
 ## Installation
 
@@ -30,99 +23,244 @@ plugins:
   - essentia
 ```
 
-### Install the Essentia extractors
-
-You will also need the `streaming_extractor_music` binary extractor from the [Essentia project](#credits).
-Please refer to the [official installation documentation](https://essentia.upf.edu/installing.html#compiling-essentia-from-source)
-for the installation procedure for your OS. If you are stuck you can use
-the [Issue tracker](https://github.com/adamjakab/BeetsPluginXtractor/issues). If you are compiling Essentia from source,
-make sure you compile it with Gaia support (`--with-gaia`) otherwise will not be able to use the high level models.
-
-### Download the SVM models
-
-For computing the high-level descriptors you will need the prebuilt trained models for prediction. You need to download these from
-here: [SVM Models](https://essentia.upf.edu/svm_models/). I suggest that you download the most recent beta5 version.
-This means that your binaries must match this version. Put the downloaded models in any folder from which they can be
-accessed.
-
 ## Configuration
 
-All your configuration will need to go under the `xtractor` key. This is what your configuration should look like:
+All your configuration will need to go under the `essentia` key. This is what the default configuration values look like:
 
 ```yaml
-xtractor:
-  auto: no
-  dry-run: no
-  write: yes
-  threads: 1
-  force: no
-  quiet: no
-  keep_output: yes
-  keep_profiles: no
-  output_path: /mnt/data/xtraction_data
-  essentia_extractor: /mnt/data/extractors/beta5/streaming_extractor_music
-  extractor_profile:
-    highlevel:
-      svm_models:
-        - /mnt/data/extractors/beta5/svm_models/danceability.history
-        - /mnt/data/extractors/beta5/svm_models/gender.history
-        - /mnt/data/extractors/beta5/svm_models/genre_rosamerica.history
-        - /mnt/data/extractors/beta5/svm_models/mood_acoustic.history
-        - /mnt/data/extractors/beta5/svm_models/mood_aggressive.history
-        - /mnt/data/extractors/beta5/svm_models/mood_electronic.history
-        - /mnt/data/extractors/beta5/svm_models/mood_happy.history
-        - /mnt/data/extractors/beta5/svm_models/mood_sad.history
-        - /mnt/data/extractors/beta5/svm_models/mood_party.history
-        - /mnt/data/extractors/beta5/svm_models/mood_relaxed.history
-        - /mnt/data/extractors/beta5/svm_models/voice_instrumental.history
-        - /mnt/data/extractors/beta5/svm_models/moods_mirex.history
+essentia:
+  auto: no # auto execute on import
+  dry-run: no # only display changes, but do not apply
+  write: yes # write changes to the file metadata
+  threads: auto # how many cpu threads to use
+  force: no # force overwrite existing metadata entries (mainly for bpm)
+  quiet: no # do not display logs
+  path: auto # folder containing the tensorflow models (the models will be downloaded by default to ~/essentia)
+  tags: # tagging settings
+    bpm: # bpm
+      enabled: yes # should this tag be analysed
+      threshold: 0.1 # threshold for the models confidence (0.1 means that the model is 90% confident, that the bpm is right)
+      # model to use 
+      # -- this can also be an absolute path to a metadata file
+      #    for choosing possible model metadata files look here: https://essentia.upf.edu/models.html
+      # -- or this could be the path to the actual model and metadata files (without the .pb/.json ending)
+      # if no file is present the model defined here will be automatically downloaded
+      # from https://essentia.upf.edu/models/(model).(pb|json)
+      model: "tempo/tempocnn/deeptemp-k16-3"
+    mood: # mood
+      enabled: yes
+      mapping: mood # how the actual music tag should be named
+      separator: ";" # what separator should be used to separate multiple moods
+      moods: # the individual moods
+        aggressive:
+          enabled: yes
+          threshold: 0.1
+          mapping: # multiple names can be added to the mood list
+            - aggressive
+          model: "classification-heads/mood_aggressive/mood_aggressive-discogs-effnet-1"
+        happy:
+          enabled: yes
+          threshold: 0.1
+          mapping:
+            - happy
+          model: "classification-heads/mood_happy/mood_happy-discogs-effnet-1"
+        party:
+          enabled: yes
+          threshold: 0.1
+          mapping:
+            - party
+          model: "classification-heads/mood_party/mood_party-discogs-effnet-1"
+        relaxed:
+          enabled: yes
+          threshold: 0.1
+          mapping:
+            - relaxed
+          model: "classification-heads/mood_relaxed/mood_relaxed-discogs-effnet-1"
+        sad:
+          enabled: yes
+          threshold: 0.1
+          mapping:
+            - sad
+          model: "classification-heads/mood_sad/mood_sad-discogs-effnet-1"
+        mirex:
+          enabled: no
+          threshold: 0.1
+          embedding_model: 'feature-extractors/musicnn/msd-musicnn-1'
+          model: "classification-heads/mood_mirex/moods_mirex-msd-musicnn-1"
+          mapping:
+            # the individual mirex categories have multiple adjacent moods
+            # by default only one is activated per category
+            category_1:
+              - passionate
+              #- rousing
+              #- confident
+              #- boisterous
+              #- rowdy
+            category_2:
+              #- rollicking
+              - cheerful
+              #- fun
+              #- sweet
+              #- amiable
+              #- good-natured
+            category_3:
+              #- literate
+              #- poignant
+              - wistful
+              #- bittersweet
+              #- autumnal
+              #- brooding
+            category_4:
+              - humorous
+              #- silly
+              #- campy
+              #- quirky
+              #- whimsical
+              #- witty
+              #- wry
+            category_5:
+              - aggressive
+              #- fiery
+              #- tense
+              #- anxious
+              #- intense
+              #- volatile
+              #- visceral
+        jamendo:
+          enabled: no
+          threshold: 0.1
+          embedding_model: 'feature-extractors/discogs-effnet/discogs_track_embeddings-effnet-bs64-1'
+          model: "classification-heads/mtg_jamendo_moodtheme/mtg_jamendo_moodtheme-discogs_track_embeddings-effnet-1"
+          mapping:
+            # the jamendo model handles not only moods, but also themes
+            # by default only the moods are stored in the mood tag
+            #action:
+            #  - action
+            #adventure:
+            #  - adventure
+            #advertising:
+            #  - advertising
+            #background:
+            #  - background
+            #ballad:
+            #  - ballad
+            calm:
+              - calm
+            #children:
+            #  - children
+            #christmas:
+            #  - christmas
+            #commercial:
+            #  - commercial
+            cool:
+              - cool
+            #corporate:
+            #  - corporate
+            dark:
+              - dark
+            deep:
+              - deep
+            #documentary:
+            #  - documentary
+            #drama:
+            #  - drama
+            dramatic:
+              - dramatic
+            #dream:
+            #  - dream
+            emotional:
+              - emotional
+            energetic:
+              - energetic
+            epic:
+              - epic
+            fast:
+              - fast
+            #film:
+            #  - film
+            #fun:
+            #  - fun
+            funny:
+              - funny
+            #game:
+            #  - game
+            groovy:
+              - groovy
+            happy:
+              - happy
+            heavy:
+              - heavy
+            #holiday:
+            #  - holiday
+            hopeful:
+              - hopeful
+            inspiring:
+              - inspiring
+            #love:
+            #  - love
+            meditative:
+              - meditative
+            melancholic:
+              - melancholic
+            melodic:
+              - melodic
+            motivational:
+              - motivational
+            #movie:
+            #  - movie
+            #nature:
+            #  - nature
+            party:
+              - party
+            positive:
+              - positive
+            powerful:
+              - powerful
+            relaxing:
+              - relaxing
+            #retro:
+            #  - retro
+            romantic:
+              - romantic
+            sad:
+              - sad
+            sexy:
+              - sexy
+            slow:
+              - slow
+            soft:
+              - soft
+            #soundscape:
+            #  - soundscape
+            #space:
+            #  - space
+            #sport:
+            #  - sport
+            #summer:
+            #  - summer
+            #trailer:
+            #  - trailer
+            #travel:
+            #  - travel
+            upbeat:
+              - upbeat
+            uplifting:
+              - uplifting
 ```
-
-First of all, you will need adjust all paths. Put the path of the extractor binary in `essentia_extractor` and
-substitute the location of the SVM models with your local path under the `svm_models` section. Finally, set
-the `output_path` to indicate where the extracted data files will be stored. If you do not set this, a temporary path
-will be used.
-will be used.
-
-**Note on shell tilde expansion**: Please note that you cannot use shell expansion on the `svm_models` (i.e.: do not use `~` for your home folder).
-The entire section of `extractor_profile` is passed as-is to the essentia extractor binary and it will not do tilde expansion on your paths.
-The rest of the path keys such as `essentia_extractor` and `output_path` are used by the plugin itself and it will take
-care of expanding the tilde symbol (`~`) to the home directory of the user running the script.
-care of expanding the tilde symbol (`~`) to the home directory of the user running the script.
-
-By default both `keep_output` and `keep_profile` options are set to `no`. This means that after extraction (and the
-storage of the important information) the profile files used to pass to the extractors, and the json files created by
-the extractors will be deleted. There are various reasons you might want to keep these files. One is for debugging
-purposes. Another is to see what else is in these files (there is a lot) and maybe to use them with some other projects
-of yours. Lastly, you might want to keep these because the plugin only extracts data if these files are not present. If
-you store them, on a successive extraction, the plugin will skip the extraction and use these files (they are named
-by `mb_trackid`) - speeding up the process a lot.
-
-The `force` option instructs the plugin to execute on items which already have the required properties.
-
-The `threads` option sets the number of concurrent executions. By default this is set to 1.
-If you remove this option or if you set it to 0 the number of CPU cores present on your machine will be used.
-The extraction is quite a CPU intensive process so there might be cases when you want to limit it to just 1.
-
-The `write` option instructs the plugin to write the extracted attributes to the media file right away. Note that only `bpm` is actually written to the media file, all the other attributes are flex attributes and are only stored in the database.
-
-The `dry-run` option shows what would be done without actually doing it.
-
-**NOTE**: Please note that the `auto` option is not yet implemented. For now you will have to call the xtractor plugin manually.
 
 ## Usage
 
 Invoke the plugin as:
 
-    $ beet xtractor [options] [QUERY...]
+    $ beet essentia [options] [QUERY...]
 
 For a more verbose reporting use the `-v` flag on `beet`:
 
-    $ beet -v xtractor [options] [QUERY...]
+    $ beet -v essentia [options] [QUERY...]
 
-The plugin has also got a shorthand `xt` so you can also invoke it like this:
+The plugin has also got a shorthand `esnt` so you can also invoke it like this:
 
-    $ beet xt [options] [QUERY...]
+    $ beet esnt [options] [QUERY...]
 
 The following command line options are available:
 
@@ -149,16 +287,6 @@ These command line options will override those specified in the configuration fi
 - If you have a feature request please use the Issue tracker.
 - In any other situation please use the Issue tracker.
 
-## Other plugins by the same author
-
-- [beets-goingrunning](https://github.com/adamjakab/BeetsPluginGoingRunning)
-- [beets-xtractor](https://github.com/adamjakab/BeetsPluginXtractor)
-- [beets-yearfixer](https://github.com/adamjakab/BeetsPluginYearFixer)
-- [beets-autofix](https://github.com/adamjakab/BeetsPluginAutofix)
-- [beets-describe](https://github.com/adamjakab/BeetsPluginDescribe)
-- [beets-bpmanalyser](https://github.com/adamjakab/BeetsPluginBpmAnalyser)
-- [beets-template](https://github.com/adamjakab/BeetsPluginTemplate)
-
 ## Credits
 
 Essentia is an open-source C++ library with Python bindings for audio analysis and audio-based music information retrieval. It is released under the Affero GPLv3 license and is also available under proprietary license upon request. This plugin is just a mere wrapper around this library. [Learn more about the Essentia project](http://essentia.upf.edu)
@@ -166,11 +294,4 @@ Essentia is an open-source C++ library with Python bindings for audio analysis a
 ## References
 
 - [Essentia](https://essentia.upf.edu/index.html)
-- [SVM Models](https://essentia.upf.edu/svm_models/)
 - [Essentia Licensing](https://essentia.upf.edu/licensing_information.html)
-- [MTG Github - Music Technology Group](https://github.com/MTG)
-- [Acousticbrainz Downloads](https://acousticbrainz.org/download)
-
-## Final Remarks
-
-Enjoy!
