@@ -1,4 +1,3 @@
-import multiprocessing
 from os import path
 from logging import Logger
 from optparse import OptionParser
@@ -23,77 +22,61 @@ class EssentiaCommand(Subcommand):
 
     items_to_analyse = None
 
-    cfg_auto = False
-    cfg_dry_run = False
-    cfg_write = True
-    cfg_threads = 1
-    cfg_force = False
-    cfg_quiet = False
-
     def __init__(self, config: ConfigView, log: Logger):
         self.config = config
         self.log = log
 
-        cfg = self.config.flatten()
-        self.cfg_auto = cfg.get("auto")
-        self.cfg_dry_run = cfg.get("dry-run")
-        self.cfg_write = cfg.get("write")
-        self.cfg_threads = cfg.get("threads")
-        self.cfg_force = cfg.get("force")
-        self.cfg_version = False
-        self.cfg_count_only = False
-        self.cfg_quiet = cfg.get("quiet")
+        cfg_dry_run = self.config["dry-run"].get()
+        cfg_write = self.config["write"].get()
+        cfg_threads = self.config["threads"].get()
+        cfg_force = self.config["force"].get()
+        cfg_version = False
+        cfg_count_only = False
+        cfg_quiet = self.config["quiet"].get()
 
-        self.parser = OptionParser(
-            usage='beet {plg} [options] [QUERY...]'.format(
-                plg=plg_ns['__PLUGIN_NAME__']
-            ))
+        self.parser = OptionParser(usage='beet {plg} [options] [QUERY...]'.format(plg=plg_ns['__PLUGIN_NAME__']))
 
         self.parser.add_option(
             '-d', '--dry-run',
-            action='store_true', dest='dryrun', default=self.cfg_dry_run,
+            action='store_true', dest='dryrun', default=cfg_dry_run,
             help=u'[default: {}] only show what would be done'
-                 u'library items'.format(
-                self.cfg_dry_run)
+                 u'library items'.format(cfg_dry_run)
         )
 
         self.parser.add_option(
             '-w', '--write',
-            action='store_true', dest='write', default=self.cfg_write,
+            action='store_true', dest='write', default=cfg_write,
             help=u'[default: {}] write the extracted values (bpm) to the media '
-                 u'files'.format(
-                self.cfg_write)
+                 u'files'.format(cfg_write)
         )
 
         self.parser.add_option(
             '-t', '--threads',
-            action='store', dest='threads', type='int',
-            default=self.cfg_threads,
-            help=u'[default: {}] the number of threads to run in parallel'.format(
-                self.cfg_threads)
+            action='store', dest='threads', type='int', default=cfg_threads,
+            help=u'[default: {}] the number of threads to run in parallel'.format(cfg_threads)
         )
 
         self.parser.add_option(
             '-f', '--force',
-            action='store_true', dest='force', default=self.cfg_force,
-            help=u'[default: {}] force analysis of items with non-zero bpm values'.format(self.cfg_force)
+            action='store_true', dest='force', default=cfg_force,
+            help=u'[default: {}] force analysis of items with non-zero bpm values'.format(cfg_force)
         )
 
         self.parser.add_option(
             '-c', '--count-only',
-            action='store_true', dest='count_only', default=self.cfg_count_only,
-            help=u'[default: {}] Show the number of items to be processed'.format(self.cfg_count_only)
+            action='store_true', dest='count_only', default=cfg_count_only,
+            help=u'[default: {}] Show the number of items to be processed'.format(cfg_count_only)
         )
 
         self.parser.add_option(
             '-q', '--quiet',
-            action='store_true', dest='quiet', default=self.cfg_quiet,
-            help=u'[default: {}] mute all output'.format(self.cfg_quiet)
+            action='store_true', dest='quiet', default=cfg_quiet,
+            help=u'[default: {}] mute all output'.format(cfg_quiet)
         )
 
         self.parser.add_option(
             '-v', '--version',
-            action='store_true', dest='version', default=self.cfg_version,
+            action='store_true', dest='version', default=cfg_version,
             help=u'show plugin version'
         )
 
@@ -107,18 +90,11 @@ class EssentiaCommand(Subcommand):
         )
 
     def func(self, lib: Library, options, arguments):
-        self.cfg_dry_run = options.dryrun
-        self.cfg_write = options.write
-        self.cfg_threads = options.threads
-        self.cfg_force = options.force
-        self.cfg_version = options.version
-        self.cfg_count_only = options.count_only
-        self.cfg_quiet = options.quiet
-
-        # Auto Thread Count
-        if self.cfg_threads == 'auto':
-            self.cfg_threads = multiprocessing.cpu_count()
-            self.log.debug("Adjusting max threads to CPU count: {0}".format(self.cfg_threads), True)
+        self.config['dry-run'].set(options.dryrun)
+        self.config['write'].set(options.write)
+        self.config['force'].set(options.force)
+        self.config['quiet'].set(options.quiet)
+        self.config['threads'].set(options.threads)
 
         self.lib = lib
         self.query = decargs(arguments)
@@ -127,27 +103,27 @@ class EssentiaCommand(Subcommand):
             self.show_version_information()
             return
 
-        self.analyse()
+        self.analyse(options.count_only, options.force)
 
-    def analyse(self):
-        self.find_items_to_analyse()
+    def analyse(self, count_only: bool, force: bool):
+        self.find_items_to_analyse(force)
         self.log.info("Number of items to be analysed: {}".format(len(self.items_to_analyse)), False)
 
         # Count only and exit
-        if self.cfg_count_only:
+        if count_only:
             return
 
         # Run tasks on selected items
         es = EssentiaInterface(self.config, self.log)
         es.analyse(self.items_to_analyse)
 
-    def find_items_to_analyse(self):
+    def find_items_to_analyse(self, force: bool):
         # Parse the incoming query
         parsed_query, parsed_sort = parse_query_string(" ".join(self.query), Item)
         combined_query = parsed_query
 
         # Add unprocessed items query
-        if not self.cfg_force:
+        if not force:
             # Set up the query for unprocessed items
             subqueries = []
             target_map = self.config['tags'].all_contents()

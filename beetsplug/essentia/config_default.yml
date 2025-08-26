@@ -14,6 +14,7 @@ tags:
     enabled: yes
     mapping: mood
     separator: ";"
+    force_overwrite: no
     moods:
       aggressive:
         enabled: yes

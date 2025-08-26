@@ -51,6 +51,7 @@ essentia:
       enabled: yes
       mapping: mood # how the actual music tag should be named
       separator: ";" # what separator should be used to separate multiple moods
+      force_overwrite: no # overwrite existing moods on force, instead of appending new moods
       moods: # the individual moods
         aggressive:
           enabled: yes

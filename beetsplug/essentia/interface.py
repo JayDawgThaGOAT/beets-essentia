@@ -1,6 +1,8 @@
 import json
+import multiprocessing
 import os.path
 import urllib.request
+from concurrent import futures
 from logging import Logger
 
 from os import path
@@ -133,16 +135,26 @@ class EssentiaModel:
 class EssentiaInterface:
     def __init__(self, config: ConfigView, log: Logger):
         self._config = config
-        self._log = log
+        self._logger = log
+        self._max_threads = config['threads'].get() \
+            if config['threads'].get() != 'auto' else multiprocessing.cpu_count()
+        self._dry_run: bool = config['dry-run'].get(bool)
+        self._quiet: bool = config['quiet'].get(bool)
+        self._force: bool = config['force'].get(bool)
+        self._write: bool = config['write'].get(bool)
 
         self._bpm_model = self._load_bpm_model()
         self._mood_models = self._load_mood_models()
+
+    def _log(self, msg: str):
+        if not self._quiet:
+            self._logger.info(msg)
 
     def _load_bpm_model(self) -> EssentiaModel|None:
         model_folder = self._config['path'].get(str)
         if self._config['tags']['bpm']['enabled'].get(bool):
             return EssentiaModel(
-                self._log,
+                self._logger,
                 model_folder,
                 self._config['tags']['bpm'],
                 'bpm'
@@ -158,7 +170,7 @@ class EssentiaInterface:
             for mood_name, mood in self._config['tags']['mood']['moods'].items():
                 if mood['enabled'].get(bool):
                     models.append(EssentiaModel(
-                        self._log,
+                        self._logger,
                         model_folder,
                         mood,
                         mood_name
@@ -181,12 +193,23 @@ class EssentiaInterface:
         confidence = sum(local_probs) / len(local_probs)
 
         if  1 - confidence <= self._config['tags']['bpm']['threshold'].get(float):
-            self._log.info(f'BPM success {item.path}: {global_bpm} / {confidence:.4f}')
-            item['bpm'] = global_bpm
+            if 'bpm' in item and item['bpm']:
+                if self._force:
+                    self._log(f'[BPM][OVERWRITE][{item.path}]: {item['bpm']} -> {global_bpm} / {confidence:.4f}')
+                    item['bpm'] = global_bpm
+                else:
+                    self._log(f'[BPM][SKIP][{item.path}]: {item['bpm']} -> {global_bpm} / {confidence:.4f}')
+            else:
+                self._log(f'[BPM][ADD][{item.path}]: {global_bpm} / {confidence:.4f}')
+                item['bpm'] = global_bpm
         else:
-            self._log.info(f'BPM below threshold {item.path}: {global_bpm} / {confidence:.4f}')
+            self._log(f'[BPM][THRESHOLD][{item.path}]: {global_bpm} / {confidence:.4f}')
 
     def _analyze_mood(self, loader: es.MonoLoader, item: Item):
+        if self._force and self._config['mood']['force_overwrite'].get(bool):
+            self._log(f'[Mood][OVERWRITE][{item.path}]: {item['mood']}')
+            item['mood'] = None
+
         for model in self._mood_models:
             loader.configure(
                 filename=item.path.decode('utf-8'),
@@ -196,30 +219,40 @@ class EssentiaInterface:
             audio = loader()
             embedding = model.embed(audio)
             predictions = [entry[0] for entry in model.analyse(embedding)]
-            self._log.info(f'Things {predictions}')
+            self._log(f'Things {predictions}')
             confidence = sum(predictions) / len(predictions)
 
             if  1 - confidence <= model.config['threshold'].get(float):
-                moods = ';'.join([mood.get() for mood in model.config['mapping'].sequence()])
+                moods = set(mood.get() for mood in model.config['mapping'].sequence())
                 if 'mood' in item and item['mood']:
-                    item['mood'] = f'{item['mood']}{self._config['tags']['mood']['separator']}{moods}'
+                    self._log(f'[Mood][APPEND][{item.path}]: {model.model_metadata['name']} / {item['mood']} / {confidence:.4f}')
+                    item_moods = set(item['mood'].split(';')) ^ moods
+                    item['mood'] = f'{item['mood']}{self._config['tags']['mood']['separator']}{';'.join(sorted(item_moods))}'
                 else:
-                    item['mood'] = moods
-                self._log.info(f'Mood success {item.path}: {model.model_metadata['name']} / {item['mood']} / {confidence:.4f}')
+                    self._log(f'[Mood][ADD][{item.path}]: {model.model_metadata['name']} / {item['mood']} / {confidence:.4f}')
+                    item['mood'] = sorted(moods)
             else:
-                self._log.info(f'Mood below threshold {item.path}: {model.model_metadata['name']} / {confidence:.4f}')
+                self._log(f'[Mood][THRESHOLD][{item.path}]: {model.model_metadata['name']} / {confidence:.4f}')
 
     def _analyse_item(self, item: Item) -> None:
         if not path.isfile(item.path):
-            self._log.error(f'Item {item.path} not found!')
+            self._logger.error(f'Item {item.path} not found!')
             return
 
         loader = es.MonoLoader()
 
         self._analyze_bpm(loader, item)
         self._analyze_mood(loader, item)
-        item.write()
 
-    def analyse(self, items: [Item]):
-        for item in items:
-            self._analyse_item(item)
+        if self._write and not self._dry_run:
+            success = item.try_write()
+            if success:
+                self._log(f'{item.path}: tags written successfully')
+            else:
+                self._logger.error(f'{item.path}: failed to write tags')
+        if self._dry_run:
+            self._log(f'{item.path}: tags written successfully')
+
+    def analyse(self, items: [Item]) -> [Item]:
+        with futures.ThreadPoolExecutor(max_workers=self._max_threads) as executor:
+            executor.map(self._analyse_item, items)
