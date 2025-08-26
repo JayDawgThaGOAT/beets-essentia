@@ -1,0 +1,208 @@
+auto: no
+dry-run: no
+write: yes
+threads: auto
+force: no
+quiet: no
+path: auto
+tags:
+  bpm:
+    enabled: yes
+    threshold: 0.1
+    model: "tempo/tempocnn/deeptemp-k16-3"
+  mood:
+    enabled: yes
+    mapping: mood
+    separator: ";"
+    split_into_tags: no
+    moods:
+      aggressive:
+        enabled: yes
+        threshold: 0.1
+        mapping:
+          - aggressive
+        model: "classification-heads/mood_aggressive/mood_aggressive-discogs-effnet-1"
+      happy:
+        enabled: yes
+        threshold: 0.1
+        mapping:
+          - happy
+        model: "classification-heads/mood_happy/mood_happy-discogs-effnet-1"
+      party:
+        enabled: yes
+        threshold: 0.1
+        mapping:
+          - party
+        model: "classification-heads/mood_party/mood_party-discogs-effnet-1"
+      relaxed:
+        enabled: yes
+        threshold: 0.1
+        mapping:
+          - relaxed
+        model: "classification-heads/mood_relaxed/mood_relaxed-discogs-effnet-1"
+      sad:
+        enabled: yes
+        threshold: 0.1
+        mapping:
+          - sad
+        model: "classification-heads/mood_sad/mood_sad-discogs-effnet-1"
+      mirex:
+        enabled: no
+        threshold: 0.1
+        embedding_model: 'feature-extractors/musicnn/msd-musicnn-1'
+        model: "classification-heads/mood_mirex/moods_mirex-msd-musicnn-1"
+        mapping:
+          category_1:
+            - passionate
+            #- rousing
+            #- confident
+            #- boisterous
+            #- rowdy
+          category_2:
+            #- rollicking
+            - cheerful
+            #- fun
+            #- sweet
+            #- amiable
+            #- good-natured
+          category_3:
+            #- literate
+            #- poignant
+            - wistful
+            #- bittersweet
+            #- autumnal
+            #- brooding
+          category_4:
+            - humorous
+            #- silly
+            #- campy
+            #- quirky
+            #- whimsical
+            #- witty
+            #- wry
+          category_5:
+            - aggressive
+            #- fiery
+            #- tense
+            #- anxious
+            #- intense
+            #- volatile
+            #- visceral
+      jamendo:
+        enabled: no
+        threshold: 0.1
+        embedding_model: 'feature-extractors/discogs-effnet/discogs_track_embeddings-effnet-bs64-1'
+        model: "classification-heads/mtg_jamendo_moodtheme/mtg_jamendo_moodtheme-discogs_track_embeddings-effnet-1"
+        mapping:
+          #action:
+          #  - action
+          #adventure:
+          #  - adventure
+          #advertising:
+          #  - advertising
+          #background:
+          #  - background
+          #ballad:
+          #  - ballad
+          calm:
+            - calm
+          #children:
+          #  - children
+          #christmas:
+          #  - christmas
+          #commercial:
+          #  - commercial
+          cool:
+            - cool
+          #corporate:
+          #  - corporate
+          dark:
+            - dark
+          deep:
+            - deep
+          #documentary:
+          #  - documentary
+          #drama:
+          #  - drama
+          dramatic:
+            - dramatic
+          #dream:
+          #  - dream
+          emotional:
+            - emotional
+          energetic:
+            - energetic
+          epic:
+            - epic
+          fast:
+            - fast
+          #film:
+          #  - film
+          #fun:
+          #  - fun
+          funny:
+            - funny
+          #game:
+          #  - game
+          groovy:
+            - groovy
+          happy:
+            - happy
+          heavy:
+            - heavy
+          #holiday:
+          #  - holiday
+          hopeful:
+            - hopeful
+          inspiring:
+            - inspiring
+          #love:
+          #  - love
+          meditative:
+            - meditative
+          melancholic:
+            - melancholic
+          melodic:
+            - melodic
+          motivational:
+            - motivational
+          #movie:
+          #  - movie
+          #nature:
+          #  - nature
+          party:
+            - party
+          positive:
+            - positive
+          powerful:
+            - powerful
+          relaxing:
+            - relaxing
+          #retro:
+          #  - retro
+          romantic:
+            - romantic
+          sad:
+            - sad
+          sexy:
+            - sexy
+          slow:
+            - slow
+          soft:
+            - soft
+          #soundscape:
+          #  - soundscape
+          #space:
+          #  - space
+          #sport:
+          #  - sport
+          #summer:
+          #  - summer
+          #trailer:
+          #  - trailer
+          #travel:
+          #  - travel
+          upbeat:
+            - upbeat
+          uplifting:
+            - uplifting
