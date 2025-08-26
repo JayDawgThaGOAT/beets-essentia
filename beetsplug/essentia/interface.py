@@ -8,11 +8,11 @@ from logging import Logger
 
 from os import path
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 import numpy as np
 from beets.library import Item
-from confuse import ConfigView, Subview, AttrDict, ConfigTypeError
+from confuse import ConfigView, ConfigTypeError
 
 import essentia.standard as es
 
