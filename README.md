@@ -57,37 +57,37 @@ essentia:
       moods: # the individual moods
         aggressive:
           enabled: yes
-          threshold: 0.1
+          threshold: 0.2
           mapping: # multiple names can be added to the mood list
             - aggressive
-          model: "classification-heads/mood_aggressive/mood_aggressive-discogs-effnet-1"
+          model: "classification-heads/mood_aggressive/mood_aggressive-audioset-vggish-1"
         happy:
           enabled: yes
-          threshold: 0.1
+          threshold: 0.2
           mapping:
             - happy
-          model: "classification-heads/mood_happy/mood_happy-discogs-effnet-1"
+          model: "classification-heads/mood_happy/mood_happy-audioset-vggish-1"
         party:
           enabled: yes
-          threshold: 0.1
+          threshold: 0.2
           mapping:
             - party
-          model: "classification-heads/mood_party/mood_party-discogs-effnet-1"
+          model: "classification-heads/mood_party/mood_party-audioset-vggish-1"
         relaxed:
           enabled: yes
-          threshold: 0.1
+          threshold: 0.2
           mapping:
             - relaxed
-          model: "classification-heads/mood_relaxed/mood_relaxed-discogs-effnet-1"
+          model: "classification-heads/mood_relaxed/mood_relaxed-audioset-vggish-1"
         sad:
           enabled: yes
-          threshold: 0.1
+          threshold: 0.2
           mapping:
             - sad
-          model: "classification-heads/mood_sad/mood_sad-discogs-effnet-1"
+          model: "classification-heads/mood_sad/mood_sad-audioset-vggish-1"
         mirex:
           enabled: no
-          threshold: 0.1
+          threshold: 0.2
           model: "classification-heads/mood_mirex/moods_mirex-msd-musicnn-1"
           mapping:
             # the individual mirex categories have multiple adjacent moods
