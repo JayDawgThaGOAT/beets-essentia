@@ -320,7 +320,7 @@ class EssentiaInterface:
                             item['mood'] = item_moods
                     else:
                         item_moods = self._config['tags']['mood']['separator'].get(str).join(sorted(p.moods))
-                        self._log(f'[Mood][ADD][{item.path.decode('utf-8')}] {p.name} +> {item_moods} / {p.confidence:.4f}')
+                        self._log(f'[Mood][ADD][{item.path.decode('utf-8')}] +> {item_moods} / {p.confidence:.4f}')
                         item['mood'] = item_moods
                 else:
                     self._log(f'[Mood][THRESHOLD][{item.path.decode('utf-8')}] {p.name} / {p.confidence:.4f}')

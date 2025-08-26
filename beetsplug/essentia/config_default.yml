@@ -17,31 +17,31 @@ tags:
     force_overwrite: no
     moods:
       aggressive:
-        enabled: no
+        enabled: yes
         threshold: 0.1
         mapping:
           - aggressive
         model: "classification-heads/mood_aggressive/mood_aggressive-discogs-effnet-1"
       happy:
-        enabled: no
+        enabled: yes
         threshold: 0.1
         mapping:
           - happy
         model: "classification-heads/mood_happy/mood_happy-discogs-effnet-1"
       party:
-        enabled: no
+        enabled: yes
         threshold: 0.1
         mapping:
           - party
         model: "classification-heads/mood_party/mood_party-discogs-effnet-1"
       relaxed:
-        enabled: no
+        enabled: yes
         threshold: 0.1
         mapping:
           - relaxed
         model: "classification-heads/mood_relaxed/mood_relaxed-discogs-effnet-1"
       sad:
-        enabled: no
+        enabled: yes
         threshold: 0.1
         mapping:
           - sad
@@ -88,7 +88,7 @@ tags:
             #- volatile
             #- visceral
       jamendo:
-        enabled: yes
+        enabled: no
         threshold: 0.9
         model: "classification-heads/mtg_jamendo_moodtheme/mtg_jamendo_moodtheme-discogs_track_embeddings-effnet-1"
         mapping:
