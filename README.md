@@ -23,6 +23,8 @@ plugins:
   - essentia
 ```
 
+The first start with some models can take a few minutes, while they are downloading.
+
 ## Configuration
 
 All your configuration will need to go under the `essentia` key. This is what the default configuration values look like:
