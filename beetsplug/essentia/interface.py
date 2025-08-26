@@ -296,8 +296,6 @@ class EssentiaInterface:
             embedding = model.embed(audio)
             predictions = model.analyze(embedding)
 
-            print(predictions)
-
             for p in predictions:
                 if  1 - p.confidence <= model.config['threshold'].get(float):
                     if 'mood' in item and item['mood']:
