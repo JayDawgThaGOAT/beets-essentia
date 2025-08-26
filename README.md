@@ -86,7 +86,6 @@ essentia:
         mirex:
           enabled: no
           threshold: 0.1
-          embedding_model: 'feature-extractors/musicnn/msd-musicnn-1'
           model: "classification-heads/mood_mirex/moods_mirex-msd-musicnn-1"
           mapping:
             # the individual mirex categories have multiple adjacent moods
@@ -130,7 +129,6 @@ essentia:
         jamendo:
           enabled: no
           threshold: 0.1
-          embedding_model: 'feature-extractors/discogs-effnet/discogs_track_embeddings-effnet-bs64-1'
           model: "classification-heads/mtg_jamendo_moodtheme/mtg_jamendo_moodtheme-discogs_track_embeddings-effnet-1"
           mapping:
             # the jamendo model handles not only moods, but also themes
