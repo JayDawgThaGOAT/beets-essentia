@@ -3,13 +3,16 @@ import multiprocessing
 import os.path
 import urllib.request
 from concurrent import futures
+from enum import Enum
 from logging import Logger
 
 from os import path
 from pathlib import Path
+from typing import Any, Callable
 
+import numpy as np
 from beets.library import Item
-from confuse import ConfigView
+from confuse import ConfigView, Subview, AttrDict
 
 import essentia.standard as es
 
@@ -66,7 +69,7 @@ class EssentiaModel:
             None
         )
 
-    def _load_handler(self, embedding: bool = False) -> callable:
+    def _load_handler(self, embedding: bool = False) -> Callable|None:
         model = self._embedding_model if embedding else self._model
         if model is None:
             return None
@@ -86,10 +89,10 @@ class EssentiaModel:
 
         return getattr(es, handler_class)(graphFilename=model)
 
-    def _load_handlers(self) -> (callable, callable):
+    def _load_handlers(self) -> tuple[Callable, Callable|None]:
         return self._load_handler(), self._load_handler(embedding=True)
 
-    def _load(self, model: str|None) -> (str, str):
+    def _load(self, model: str|None) -> tuple[str|None, dict|None]:
         if not model:
             return None, None
 
@@ -126,11 +129,84 @@ class EssentiaModel:
 
         return weight_file_path, metadata
 
+    def sample_rate(self) -> int:
+        return self.model_metadata['inference']['sample_rate']
+
     def embed(self, audio):
         return self._embedding_handler(audio)
 
-    def analyse(self, embedding):
+    def analyze(self, embedding):
         return self._handler(embedding)
+
+class BPMModel(EssentiaModel):
+    def __init__(
+            self,
+            log: Logger,
+            mpath: str,
+            config: ConfigView,
+            name: str
+    ):
+        super().__init__(log, mpath, config, name)
+
+    def analyze(self, embedding) -> tuple[float, list[float], list[float]]:
+        return super().analyze(embedding)
+
+
+class MoodModelType(Enum):
+    aggressive = 'aggressive'
+    happy = 'happy'
+    party = 'party'
+    relaxed = 'relaxed'
+    sad = 'sad'
+    mirex = 'mirex'
+    jamendo = 'jamendo'
+
+class MoodPrediction:
+    def __init__(self, moods: set[str], confidence: float):
+        self.confidence = confidence
+        self.moods = moods
+
+    def __repr__(self) -> str:
+        return f'{self.moods} / {self.confidence}'
+
+    def __str__(self) -> str:
+        return f'{self.moods} / {self.confidence}'
+
+class MoodModel(EssentiaModel):
+    def __init__(
+            self,
+            log: Logger,
+            mpath: str,
+            config: ConfigView,
+            name: str
+    ):
+        super().__init__(log, mpath, config, name)
+        self.model_type = MoodModelType[self.name]
+        self._moods = self._get_moods()
+
+    def _get_moods(self) -> list[set[str]] | set[str]:
+        if self.model_type == MoodModelType.mirex:
+            return [set(m.get() for m in mood.sequence()) for category, mood in sorted(self.config['mapping'].items(), key=lambda t: t[0])]
+        if self.model_type == MoodModelType.jamendo:
+            return [set(m.get() for m in mood.sequence()) for category, mood in sorted(self.config['mapping'].items(), key=lambda t: t[0])]
+
+        return set(mood.get() for mood in self.config['mapping'].sequence())
+
+    def analyze(self, embedding) -> list[MoodPrediction]:
+        predictions = super().analyze(embedding)
+
+        if self.model_type == MoodModelType.mirex:
+            sum_count = len(predictions)
+            sum_categories = np.array(predictions).sum(axis=0)
+            category_confidence = [i / sum_count for i in sum_categories]
+            return [MoodPrediction(moods, category_confidence[idx]) for idx, moods in enumerate(self._moods)]
+        if self.model_type == MoodModelType.jamendo:
+            return []
+
+        predictions_positive = [entry[0] for entry in predictions]
+        confidence = sum(predictions_positive) / len(predictions_positive)
+        return [MoodPrediction(self._moods, confidence)]
+
 
 class EssentiaInterface:
     def __init__(self, config: ConfigView, log: Logger):
@@ -150,10 +226,10 @@ class EssentiaInterface:
         if not self._quiet:
             self._logger.info(msg)
 
-    def _load_bpm_model(self) -> EssentiaModel|None:
+    def _load_bpm_model(self) -> BPMModel|None:
         model_folder = self._config['path'].get(str)
         if self._config['tags']['bpm']['enabled'].get(bool):
-            return EssentiaModel(
+            return BPMModel(
                 self._logger,
                 model_folder,
                 self._config['tags']['bpm'],
@@ -162,14 +238,14 @@ class EssentiaInterface:
 
         return None
 
-    def _load_mood_models(self) -> [EssentiaModel]:
+    def _load_mood_models(self) -> list[MoodModel]:
         model_folder = self._config['path'].get(str)
         models = []
 
         if self._config['tags']['mood']['enabled'].get(bool):
             for mood_name, mood in self._config['tags']['mood']['moods'].items():
                 if mood['enabled'].get(bool):
-                    models.append(EssentiaModel(
+                    models.append(MoodModel(
                         self._logger,
                         model_folder,
                         mood,
@@ -178,64 +254,68 @@ class EssentiaInterface:
 
         return models
 
-    def _analyze_bpm(self, loader: es.MonoLoader, item: Item):
+    def _analyze_bpm(self, loader: es.MonoLoader, item: Item) -> None:
         if self._bpm_model is None:
             return
 
         loader.configure(
             filename=item.path.decode('utf-8'),
-            sampleRate=self._bpm_model.model_metadata['inference']['sample_rate'],
+            sampleRate=self._bpm_model.sample_rate(),
             resampleQuality=4
         )
         audio = loader()
 
-        global_bpm, local_bpm, local_probs = self._bpm_model.analyse(audio)
+        global_bpm, local_bpm, local_probs = self._bpm_model.analyze(audio)
         confidence = sum(local_probs) / len(local_probs)
 
         if  1 - confidence <= self._config['tags']['bpm']['threshold'].get(float):
             if 'bpm' in item and item['bpm']:
                 if self._force:
-                    self._log(f'[BPM][OVERWRITE][{item.path}]: {item['bpm']} -> {global_bpm} / {confidence:.4f}')
+                    self._log(f'[BPM][OVERWRITE][{item.path.decode('utf-8')}] {item['bpm']} -> {global_bpm} / {confidence:.4f}')
                     item['bpm'] = global_bpm
                 else:
-                    self._log(f'[BPM][SKIP][{item.path}]: {item['bpm']} -> {global_bpm} / {confidence:.4f}')
+                    self._log(f'[BPM][SKIP][{item.path.decode('utf-8')}] {item['bpm']} -> {global_bpm} / {confidence:.4f}')
             else:
-                self._log(f'[BPM][ADD][{item.path}]: {global_bpm} / {confidence:.4f}')
+                self._log(f'[BPM][ADD][{item.path.decode('utf-8')}] {global_bpm} / {confidence:.4f}')
                 item['bpm'] = global_bpm
         else:
-            self._log(f'[BPM][THRESHOLD][{item.path}]: {global_bpm} / {confidence:.4f}')
+            self._log(f'[BPM][THRESHOLD][{item.path.decode('utf-8')}] {global_bpm} / {confidence:.4f}')
 
-    def _analyze_mood(self, loader: es.MonoLoader, item: Item):
+    def _analyze_mood(self, loader: es.MonoLoader, item: Item) -> None:
         if self._force and self._config['mood']['force_overwrite'].get(bool):
-            self._log(f'[Mood][OVERWRITE][{item.path}]: {item['mood']}')
+            self._log(f'[Mood][OVERWRITE][{item.path.decode('utf-8')}] {item['mood']}')
             item['mood'] = None
 
         for model in self._mood_models:
             loader.configure(
                 filename=item.path.decode('utf-8'),
-                sampleRate=model.model_metadata['inference']['sample_rate'],
+                sampleRate=model.sample_rate(),
                 resampleQuality=4
             )
             audio = loader()
             embedding = model.embed(audio)
-            predictions = [entry[0] for entry in model.analyse(embedding)]
-            confidence = sum(predictions) / len(predictions)
+            predictions = model.analyze(embedding)
 
-            if  1 - confidence <= model.config['threshold'].get(float):
-                moods = set(mood.get() for mood in model.config['mapping'].sequence())
-                if 'mood' in item and item['mood']:
-                    self._log(f'[Mood][APPEND][{item.path}]: {model.model_metadata['name']} / {item['mood']} / {confidence:.4f}')
-                    item_moods = set(item['mood'].split(';')) ^ moods
-                    item['mood'] = f'{item['mood']}{self._config['tags']['mood']['separator']}{';'.join(sorted(item_moods))}'
+            print(predictions)
+
+            for p in predictions:
+                if  1 - p.confidence <= model.config['threshold'].get(float):
+                    if 'mood' in item and item['mood']:
+                        item_moods = set(item['mood'].split(';')) ^ p.moods
+                        if len(item_moods) == 0:
+                            self._log(f'[Mood][MATCH][{item.path.decode('utf-8')}] {model.model_metadata['name']} / {item['mood']} == {item_moods} {p.confidence:.4f}')
+                        else:
+                            self._log(f'[Mood][APPEND][{item.path.decode('utf-8')}] {model.model_metadata['name']} / {item['mood']} +> {item_moods} {p.confidence:.4f}')
+                            item['mood'] = f'{item['mood']}{self._config['tags']['mood']['separator']}{';'.join(sorted(item_moods))}'
+                    else:
+                        self._log(f'[Mood][ADD][{item.path.decode('utf-8')}] {model.model_metadata['name']} +> {p.moods} / {p.confidence:.4f}')
+                        item['mood'] = ';'.join(sorted(p.moods))
                 else:
-                    self._log(f'[Mood][ADD][{item.path}]: {model.model_metadata['name']} / {item['mood']} / {confidence:.4f}')
-                    item['mood'] = sorted(moods)
-            else:
-                self._log(f'[Mood][THRESHOLD][{item.path}]: {model.model_metadata['name']} / {confidence:.4f}')
+                    self._log(f'[Mood][THRESHOLD][{item.path.decode('utf-8')}] {model.model_metadata['name']} / {p.confidence:.4f}')
 
     def _analyse_item(self, item: Item) -> None:
         if not path.isfile(item.path):
-            self._logger.error(f'Item {item.path} not found!')
+            self._logger.error(f'[{item.path.decode('utf-8')}] not found!')
             return
 
         loader = es.MonoLoader()
@@ -246,12 +326,12 @@ class EssentiaInterface:
         if self._write and not self._dry_run:
             success = item.try_write()
             if success:
-                self._log(f'{item.path}: tags written successfully')
+                self._log(f'[{item.path.decode('utf-8')}] tags written successfully')
             else:
-                self._logger.error(f'{item.path}: failed to write tags')
+                self._logger.error(f'[{item.path.decode('utf-8')}] failed to write tags')
         if self._dry_run:
-            self._log(f'{item.path}: tags written successfully')
+            self._log(f'[{item.path}] tags written successfully')
 
-    def analyse(self, items: [Item]) -> [Item]:
+    def analyse(self, items: [Item]) -> None:
         with futures.ThreadPoolExecutor(max_workers=self._max_threads) as executor:
             executor.map(self._analyse_item, items)
