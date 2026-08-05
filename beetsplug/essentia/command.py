@@ -39,15 +39,15 @@ class EssentiaCommand(Subcommand):
         self.parser.add_option(
             '-d', '--dry-run',
             action='store_true', dest='dryrun', default=cfg_dry_run,
-            help=u'[default: {}] only show what would be done'
-                 u'library items'.format(cfg_dry_run)
+            help=u'[default: {}] only show what would be done without '
+                 u'modifying library items or files'.format(cfg_dry_run)
         )
 
         self.parser.add_option(
             '-w', '--write',
             action='store_true', dest='write', default=cfg_write,
-            help=u'[default: {}] write the extracted values (bpm) to the media '
-                 u'files'.format(cfg_write)
+            help=u'[default: {}] write the extracted values (bpm, mood) to the '
+                 u'media files'.format(cfg_write)
         )
 
         self.parser.add_option(
@@ -59,7 +59,8 @@ class EssentiaCommand(Subcommand):
         self.parser.add_option(
             '-f', '--force',
             action='store_true', dest='force', default=cfg_force,
-            help=u'[default: {}] force analysis of items with non-zero bpm values'.format(cfg_force)
+            help=u'[default: {}] force analysis of items that already have '
+                 u'values for enabled tags'.format(cfg_force)
         )
 
         self.parser.add_option(

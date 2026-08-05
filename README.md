@@ -41,7 +41,7 @@ essentia:
   tags: # tagging settings
     bpm: # bpm
       enabled: yes # should this tag be analysed
-      threshold: 0.1 # threshold for the models confidence (0.1 means that the model is 90% confident, that the bpm is right)
+      threshold: 0.5 # threshold for the models confidence (0.5 means that the model is 50% confident, that the bpm is right)
       # model to use 
       # -- this can also be an absolute path to a metadata file
       #    for choosing possible model metadata files look here: https://essentia.upf.edu/models.html
@@ -86,9 +86,9 @@ essentia:
             - sad
           model: "classification-heads/mood_sad/mood_sad-audioset-vggish-1"
         mirex:
-          enabled: no
+          enabled: yes
           threshold: 0.2
-          model: "classification-heads/mood_mirex/moods_mirex-msd-musicnn-1"
+          model: "classification-heads/moods_mirex/moods_mirex-audioset-vggish-1"
           mapping:
             # the individual mirex categories have multiple adjacent moods
             # by default only one is activated per category
@@ -130,7 +130,7 @@ essentia:
               #- visceral
         jamendo:
           enabled: no
-          threshold: 0.1
+          threshold: 0.9
           model: "classification-heads/mtg_jamendo_moodtheme/mtg_jamendo_moodtheme-discogs_track_embeddings-effnet-1"
           mapping:
             # the jamendo model handles not only moods, but also themes
@@ -265,13 +265,13 @@ The plugin has also got a shorthand `esnt` so you can also invoke it like this:
 
 The following command line options are available:
 
-**--dry-run [-d]**: Only show what would be done - displays the extracted values but does not store them in the library.
+**--dry-run [-d]**: Only show what would be done - displays the extracted values but does not store them in the library or write them to files.
 
-**--write [-w]**: Write the values (bpm only) to the media files.
+**--write [-w]**: Write the values (bpm and mood) to the media files.
 
 **--threads=THREADS [-t THREADS]**: The number of concurrently running executions.
 
-**--force [-f]**: Force the analysis of all items (skip attribute checks).
+**--force [-f]**: Force the analysis of items that already have values for enabled tags.
 
 **--count-only [-c]**: Show the number of items to be processed and exit. Extraction will not be executed.
 
