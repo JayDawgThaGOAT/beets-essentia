@@ -30,9 +30,19 @@ class EssentiaPlugin(BeetsPlugin):
         )
         self.add_media_field('mood', mood)
 
+        if self.config['auto'].get(bool):
+            self.import_stages = [self.imported]
+
     def imported(self, _, task: ImportTask) -> None:
+        if not self.config['auto'].get(bool):
+            return
+
+        items = task.imported_items()
+        if not items:
+            return
+
         es = EssentiaInterface(self.config, self._log)
-        es.analyse(task.items)
+        es.analyse(items)
 
     def commands(self) -> list[Subcommand]:
         return [EssentiaCommand(self.config, self._log)]
