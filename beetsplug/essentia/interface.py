@@ -8,7 +8,7 @@ import time
 import urllib.error
 from concurrent import futures
 from enum import Enum
-from logging import Logger
+from logging import DEBUG, Logger
 from os import path
 from pathlib import Path
 from typing import Callable
@@ -509,6 +509,20 @@ class EssentiaInterface:
         if not self._quiet:
             self._logger.info(msg)
 
+    @staticmethod
+    def _item_label(item: Item) -> str:
+        title = item.get('title')
+        if title:
+            return str(title)
+        return path.splitext(path.basename(item.path.decode('utf-8')))[0]
+
+    def _should_log_rejects(self) -> bool:
+        if self._quiet:
+            return False
+        if self._config['tags']['mood']['log_rejects'].get(bool):
+            return True
+        return self._logger.isEnabledFor(DEBUG)
+
     def _configured_model_ids(self) -> list[str]:
         ids: list[str] = []
         if self._config['tags']['bpm']['enabled'].get(bool):
@@ -577,13 +591,18 @@ class EssentiaInterface:
             self._log(f'[BPM][THRESHOLD][{item.path.decode('utf-8')}] {global_bpm} / {confidence:.4f}')
 
     def _analyze_mood(self, loader: es.MonoLoader, item: Item) -> None:
+        if not self._mood_models:
+            return
+
         if self._force and self._config['tags']['mood']['force_overwrite'].get(bool):
-            self._log(f'[Mood][OVERWRITE][{item.path.decode('utf-8')}] {item['mood']}')
+            self._log(f'[Mood][OVERWRITE][{self._item_label(item)}] {item.get('mood')}')
             item['mood'] = None
 
         separator = self._config['tags']['mood']['separator'].get(str)
         # Reuse embeddings when multiple heads share the same embedder + sample rate.
         embedding_cache: dict[tuple[str | None, int], object] = {}
+        accepted: dict[str, float] = {}
+        rejected: list[tuple[str, float]] = []
 
         for model in self._mood_models:
             emb_key = (model._embedding_model, model.sample_rate())
@@ -602,36 +621,55 @@ class EssentiaInterface:
                 if len(p.moods) == 0:
                     continue
 
-                if  1 - p.confidence <= model.config['threshold'].get(float):
+                label = separator.join(sorted(p.moods))
+                if 1 - p.confidence <= model.config['threshold'].get(float):
+                    for mood in p.moods:
+                        accepted[mood] = max(accepted.get(mood, 0.0), p.confidence)
+
                     if 'mood' in item and item['mood']:
                         existing_list = item['mood'].split(separator)
                         item_moods_list = sorted(set(existing_list) | p.moods)
-                        item_moods = separator.join(item_moods_list)
-                        if len(item_moods_list) == len(existing_list):
-                            self._log(f'[Mood][SKIP][{item.path.decode('utf-8')}] {p.name} / {item['mood']} == {item_moods} {p.confidence:.4f}')
-                        else:
-                            self._log(f'[Mood][APPEND][{item.path.decode('utf-8')}] {p.name} / {item['mood']} +> {item_moods} {p.confidence:.4f}')
-                            item['mood'] = item_moods
+                        item['mood'] = separator.join(item_moods_list)
                     else:
-                        item_moods = separator.join(sorted(p.moods))
-                        self._log(f'[Mood][ADD][{item.path.decode('utf-8')}] +> {item_moods} / {p.confidence:.4f}')
-                        item['mood'] = item_moods
+                        item['mood'] = separator.join(sorted(p.moods))
                 else:
-                    self._log(f'[Mood][THRESHOLD][{item.path.decode('utf-8')}] {p.name} / {p.confidence:.4f}')
+                    rejected.append((label, p.confidence))
+
+        track = self._item_label(item)
+        if accepted:
+            score_parts = ' '.join(
+                f'{mood}={accepted[mood]:.4f}' for mood in sorted(accepted)
+            )
+            final = item.get('mood') or '_(none)_'
+            self._log(f'[Mood][WRITE][{track}] {score_parts} → {final}')
+        else:
+            self._log(f'[Mood][WRITE][{track}] _(none)_')
+
+        if self._should_log_rejects() and rejected:
+            reject_count = self._config['tags']['mood']['reject_count'].get(int)
+            rejected.sort(key=lambda entry: entry[1], reverse=True)
+            reject_parts = ' '.join(
+                f'{label}={confidence:.4f}'
+                for label, confidence in rejected[:reject_count]
+            )
+            self._log(f'[Mood][REJECT][{track}] {reject_parts}')
 
     def _persist_item(self, item: Item) -> None:
         """Write file tags and/or store library fields after analysis."""
         decoded_path = item.path.decode('utf-8')
 
         if self._dry_run:
-            if self._write:
-                self._log(f'[{decoded_path}] would write tags')
+            # Mood/BPM status lines already describe the dry-run result.
             return
 
         if self._write:
             success = item.try_write()
             if success:
-                self._log(f'[{decoded_path}] tags written successfully')
+                mood = item.get('mood')
+                if mood:
+                    self._log(f'[{decoded_path}] wrote mood={mood}')
+                else:
+                    self._log(f'[{decoded_path}] tags written successfully')
             else:
                 self._logger.error(f'[{decoded_path}] failed to write tags')
 

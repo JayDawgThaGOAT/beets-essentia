@@ -15,6 +15,9 @@ tags:
     mapping: mood
     separator: ";"
     force_overwrite: no
+    # Log top rejected labels after each WRITE (also enabled when running beet -v)
+    log_rejects: no
+    reject_count: 5
     moods:
       aggressive:
         enabled: yes
