@@ -1,4 +1,4 @@
 prune test
 include LICENSE.txt
 include README.md
-include beetsplug/xtractor/config_default.yml
+include beetsplug/essentia/config_default.yml

@@ -28,6 +28,9 @@ setup(
     platforms='ALL',
 
     include_package_data=True,
+    package_data={
+        'beetsplug.essentia': ['config_default.yml'],
+    },
     test_suite='test',
     packages=['beetsplug.essentia'],
 
