@@ -1,6 +1,9 @@
 import json
 import multiprocessing
+import os
 import os.path
+import time
+import urllib.error
 import urllib.request
 from concurrent import futures
 from enum import Enum
@@ -12,9 +15,98 @@ from typing import Callable
 
 import numpy as np
 from beets.library import Item
+from beets.ui import UserError
 from confuse import ConfigView, ConfigTypeError
 
 import essentia.standard as es
+
+
+def _download(
+        url: str,
+        dest: str,
+        label: str,
+        log: Logger,
+        timeout: float = 60.0,
+        retries: int = 3,
+) -> None:
+    """Download *url* to *dest*, logging progress via the beets plugin logger."""
+    label_display = path.basename(label)
+    chunk_size = 64 * 1024
+
+    def _cleanup_partial() -> None:
+        if path.isfile(dest):
+            try:
+                os.remove(dest)
+            except OSError:
+                pass
+
+    def _attempt() -> None:
+        last_percent = -1
+        last_mb = -1
+
+        def _log_progress(downloaded: int, total_size: int) -> None:
+            nonlocal last_percent, last_mb
+            if total_size > 0:
+                downloaded = min(downloaded, total_size)
+                percent = downloaded * 100 // total_size
+                # Log at 0%, every +10%, and on completion.
+                if (
+                    last_percent >= 0
+                    and percent < last_percent + 10
+                    and downloaded < total_size
+                ):
+                    return
+                last_percent = percent
+                done_mb = downloaded / (1024 * 1024)
+                total_mb = total_size / (1024 * 1024)
+                log.info(f'{label_display}  {percent:3d}%  {done_mb:.2f} / {total_mb:.2f} MB')
+            else:
+                done_mb_i = int(downloaded / (1024 * 1024))
+                if done_mb_i <= last_mb:
+                    return
+                last_mb = done_mb_i
+                log.info(f'{label_display}  {done_mb_i:.2f} MB')
+
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            total_size = int(resp.headers.get('Content-Length') or 0)
+            downloaded = 0
+            _log_progress(downloaded, total_size)
+            with open(dest, 'wb') as out:
+                while True:
+                    chunk = resp.read(chunk_size)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    downloaded += len(chunk)
+                    _log_progress(downloaded, total_size)
+            if total_size <= 0:
+                log.info(
+                    f'{label_display}  done  {downloaded / (1024 * 1024):.2f} MB'
+                )
+
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
+        if attempt == 1:
+            log.info(f'Connecting: {label_display}')
+        else:
+            log.info(f'Retrying ({attempt}/{retries}): {label_display}')
+
+        try:
+            _attempt()
+            return
+        except (TimeoutError, urllib.error.URLError, OSError) as exc:
+            last_error = exc
+            _cleanup_partial()
+            if attempt < retries:
+                # Brief backoff; essentia.upf.edu TLS handshakes are flaky.
+                time.sleep(2 * attempt)
+                continue
+            break
+
+    raise UserError(
+        f'Failed to download model {label_display} after {retries} attempts: {last_error}'
+    )
+
 
 class EssentiaModel:
     def __init__(
@@ -114,7 +206,12 @@ class EssentiaModel:
 
         if not path.isfile(meta_file_path):
             self._log.info(f'Downloading model: {meta_file}')
-            urllib.request.urlretrieve(f'https://essentia.upf.edu/models/{meta_file}', meta_file_path)
+            _download(
+                f'https://essentia.upf.edu/models/{meta_file}',
+                meta_file_path,
+                meta_file,
+                self._log,
+            )
 
         metadata_file = open(meta_file_path, 'r')
         metadata = json.load(metadata_file)
@@ -125,7 +222,7 @@ class EssentiaModel:
 
         if not path.isfile(weight_file_path):
             self._log.info(f'Downloading model: {weight_file}')
-            urllib.request.urlretrieve(metadata['link'], weight_file_path)
+            _download(metadata['link'], weight_file_path, weight_file, self._log)
 
         return weight_file_path, metadata
 

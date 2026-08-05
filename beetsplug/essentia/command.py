@@ -126,9 +126,9 @@ class EssentiaCommand(Subcommand):
         if not force:
             # Set up the query for unprocessed items
             subqueries = []
-            target_map = self.config['tags'].all_contents()
-            for fld in target_map:
-                if target_map[fld]["enabled"].get(bool):
+            tags = self.config['tags']
+            for fld in tags.keys():
+                if tags[fld]["enabled"].get(bool):
                     fast = fld in Item._fields
                     query_item = dbcore.query.MatchQuery(fld, None, fast=fast)
                     subqueries.append(query_item)
