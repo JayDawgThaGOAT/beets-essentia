@@ -440,8 +440,8 @@ class EssentiaInterface:
                 self._log(f'[{item.path.decode('utf-8')}] tags written successfully')
             else:
                 self._logger.error(f'[{item.path.decode('utf-8')}] failed to write tags')
-        if self._dry_run:
-            self._log(f'[{item.path}] tags written successfully')
+        elif self._write and self._dry_run:
+            self._log(f'[{item.path.decode('utf-8')}] would write tags')
 
     def analyse(self, items: [Item]) -> None:
         with futures.ThreadPoolExecutor(max_workers=self._max_threads) as executor:
