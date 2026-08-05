@@ -389,9 +389,11 @@ class EssentiaInterface:
             self._log(f'[BPM][THRESHOLD][{item.path.decode('utf-8')}] {global_bpm} / {confidence:.4f}')
 
     def _analyze_mood(self, loader: es.MonoLoader, item: Item) -> None:
-        if self._force and self._config['mood']['force_overwrite'].get(bool):
+        if self._force and self._config['tags']['mood']['force_overwrite'].get(bool):
             self._log(f'[Mood][OVERWRITE][{item.path.decode('utf-8')}] {item['mood']}')
             item['mood'] = None
+
+        separator = self._config['tags']['mood']['separator'].get(str)
 
         for model in self._mood_models:
             loader.configure(
@@ -409,16 +411,16 @@ class EssentiaInterface:
 
                 if  1 - p.confidence <= model.config['threshold'].get(float):
                     if 'mood' in item and item['mood']:
-                        existing_list = item['mood'].split(';')
+                        existing_list = item['mood'].split(separator)
                         item_moods_list = sorted(set(existing_list) | p.moods)
-                        item_moods = self._config['tags']['mood']['separator'].get(str).join(item_moods_list)
+                        item_moods = separator.join(item_moods_list)
                         if len(item_moods_list) == len(existing_list):
                             self._log(f'[Mood][SKIP][{item.path.decode('utf-8')}] {p.name} / {item['mood']} == {item_moods} {p.confidence:.4f}')
                         else:
                             self._log(f'[Mood][APPEND][{item.path.decode('utf-8')}] {p.name} / {item['mood']} +> {item_moods} {p.confidence:.4f}')
                             item['mood'] = item_moods
                     else:
-                        item_moods = self._config['tags']['mood']['separator'].get(str).join(sorted(p.moods))
+                        item_moods = separator.join(sorted(p.moods))
                         self._log(f'[Mood][ADD][{item.path.decode('utf-8')}] +> {item_moods} / {p.confidence:.4f}')
                         item['mood'] = item_moods
                 else:
