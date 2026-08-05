@@ -2,6 +2,7 @@ import json
 import multiprocessing
 import os
 import os.path
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -328,6 +329,7 @@ class EssentiaInterface:
 
         self._bpm_model = self._load_bpm_model()
         self._mood_models = self._load_mood_models()
+        self._store_lock = threading.Lock()
 
     def _log(self, msg: str):
         if not self._quiet:
@@ -426,6 +428,27 @@ class EssentiaInterface:
                 else:
                     self._log(f'[Mood][THRESHOLD][{item.path.decode('utf-8')}] {p.name} / {p.confidence:.4f}')
 
+    def _persist_item(self, item: Item) -> None:
+        """Write file tags and/or store library fields after analysis."""
+        decoded_path = item.path.decode('utf-8')
+
+        if self._dry_run:
+            if self._write:
+                self._log(f'[{decoded_path}] would write tags')
+            return
+
+        if self._write:
+            success = item.try_write()
+            if success:
+                self._log(f'[{decoded_path}] tags written successfully')
+            else:
+                self._logger.error(f'[{decoded_path}] failed to write tags')
+
+        # Persist to the beets DB so skip queries see updated bpm/mood.
+        if getattr(item, '_db', None) is not None and item.id is not None:
+            with self._store_lock:
+                item.store()
+
     def _analyse_item(self, item: Item) -> None:
         if not path.isfile(item.path):
             self._logger.error(f'[{item.path.decode('utf-8')}] not found!')
@@ -435,16 +458,9 @@ class EssentiaInterface:
 
         self._analyze_bpm(loader, item)
         self._analyze_mood(loader, item)
+        self._persist_item(item)
 
-        if self._write and not self._dry_run:
-            success = item.try_write()
-            if success:
-                self._log(f'[{item.path.decode('utf-8')}] tags written successfully')
-            else:
-                self._logger.error(f'[{item.path.decode('utf-8')}] failed to write tags')
-        elif self._write and self._dry_run:
-            self._log(f'[{item.path.decode('utf-8')}] would write tags')
-
-    def analyse(self, items: [Item]) -> None:
+    def analyse(self, items: list[Item]) -> None:
         with futures.ThreadPoolExecutor(max_workers=self._max_threads) as executor:
-            executor.map(self._analyse_item, items)
+            # Exhaust the iterator so work completes before the pool shuts down.
+            list(executor.map(self._analyse_item, items))
