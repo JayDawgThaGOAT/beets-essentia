@@ -1,3 +1,4 @@
+import http.client
 import json
 import multiprocessing
 import os
@@ -5,14 +6,13 @@ import os.path
 import threading
 import time
 import urllib.error
-import urllib.request
 from concurrent import futures
 from enum import Enum
 from logging import Logger
-
 from os import path
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urljoin, urlparse
 
 import numpy as np
 from beets.library import Item
@@ -21,25 +21,100 @@ from confuse import ConfigView, ConfigTypeError
 
 import essentia.standard as es
 
+MODELS_BASE_URL = 'https://essentia.upf.edu/models/'
+
+
+class _HttpsSession:
+    """Keep-alive HTTPS client; reconnects after errors (UPF TLS is flaky)."""
+
+    def __init__(self, timeout: float = 60.0):
+        self._timeout = timeout
+        self._conn: http.client.HTTPSConnection | None = None
+        self._host: str | None = None
+
+    def close(self) -> None:
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except OSError:
+                pass
+            self._conn = None
+            self._host = None
+
+    def _ensure_conn(self, host: str) -> http.client.HTTPSConnection:
+        if self._conn is None or self._host != host:
+            self.close()
+            self._conn = http.client.HTTPSConnection(host, timeout=self._timeout)
+            self._host = host
+        return self._conn
+
+    def get(self, url: str) -> http.client.HTTPResponse:
+        """GET *url* and return an open response (caller must read the body)."""
+        current = url
+        for _ in range(6):
+            parsed = urlparse(current)
+            if parsed.scheme != 'https':
+                raise urllib.error.URLError(f'Only HTTPS is supported: {current}')
+
+            host = parsed.netloc
+            req_path = parsed.path or '/'
+            if parsed.query:
+                req_path = f'{req_path}?{parsed.query}'
+
+            conn = self._ensure_conn(host)
+            try:
+                conn.request('GET', req_path, headers={'Connection': 'keep-alive'})
+                resp = conn.getresponse()
+            except (TimeoutError, OSError, http.client.HTTPException):
+                self.close()
+                raise
+
+            if resp.status in (301, 302, 303, 307, 308):
+                location = resp.getheader('Location')
+                resp.read()
+                if not location:
+                    raise urllib.error.URLError(f'Redirect without Location for {current}')
+                current = urljoin(current, location)
+                # Host may change; drop pooled connection.
+                if urlparse(current).netloc != host:
+                    self.close()
+                continue
+
+            if resp.status != 200:
+                resp.read()
+                raise urllib.error.URLError(
+                    f'HTTP {resp.status} {resp.reason} for {current}'
+                )
+
+            return resp
+
+        raise urllib.error.URLError(f'Too many redirects for {url}')
+
 
 def _download(
         url: str,
         dest: str,
         label: str,
         log: Logger,
+        session: _HttpsSession | None = None,
         timeout: float = 60.0,
         retries: int = 3,
 ) -> None:
     """Download *url* to *dest*, logging progress via the beets plugin logger."""
     label_display = path.basename(label)
     chunk_size = 64 * 1024
+    partial = f'{dest}.partial'
+    owns_session = session is None
+    if session is None:
+        session = _HttpsSession(timeout=timeout)
 
     def _cleanup_partial() -> None:
-        if path.isfile(dest):
-            try:
-                os.remove(dest)
-            except OSError:
-                pass
+        for candidate in (partial, dest):
+            if path.isfile(candidate):
+                try:
+                    os.remove(candidate)
+                except OSError:
+                    pass
 
     def _attempt() -> None:
         last_percent = -1
@@ -68,11 +143,13 @@ def _download(
                 last_mb = done_mb_i
                 log.info(f'{label_display}  {done_mb_i:.2f} MB')
 
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            total_size = int(resp.headers.get('Content-Length') or 0)
+        resp = session.get(url)
+        try:
+            total_size = int(resp.getheader('Content-Length') or 0)
             downloaded = 0
             _log_progress(downloaded, total_size)
-            with open(dest, 'wb') as out:
+            Path(os.path.dirname(dest) or '.').mkdir(parents=True, exist_ok=True)
+            with open(partial, 'wb') as out:
                 while True:
                     chunk = resp.read(chunk_size)
                     if not chunk:
@@ -80,33 +157,204 @@ def _download(
                     out.write(chunk)
                     downloaded += len(chunk)
                     _log_progress(downloaded, total_size)
+            os.replace(partial, dest)
             if total_size <= 0:
                 log.info(
                     f'{label_display}  done  {downloaded / (1024 * 1024):.2f} MB'
                 )
+        finally:
+            # Ensure the body is drained/closed so keep-alive can reuse the socket.
+            try:
+                resp.close()
+            except OSError:
+                pass
 
     last_error: Exception | None = None
-    for attempt in range(1, retries + 1):
-        if attempt == 1:
-            log.info(f'Connecting: {label_display}')
+    try:
+        for attempt in range(1, retries + 1):
+            if attempt == 1:
+                log.info(f'Connecting: {label_display}')
+            else:
+                log.info(
+                    f'Retrying ({attempt}/{retries}): {label_display} ({last_error})'
+                )
+
+            try:
+                _attempt()
+                return
+            except (TimeoutError, urllib.error.URLError, OSError, http.client.HTTPException) as exc:
+                last_error = exc
+                session.close()
+                _cleanup_partial()
+                if attempt < retries:
+                    # Brief backoff; essentia.upf.edu TLS handshakes are flaky.
+                    time.sleep(1.5 * attempt)
+                    continue
+                break
+
+        raise UserError(
+            f'Failed to download model {label_display} after {retries} attempts: {last_error}'
+        )
+    finally:
+        if owns_session:
+            session.close()
+
+
+class ModelRepository:
+    """Resolve, download, and cache Essentia TF models for a library path."""
+
+    def __init__(self, log: Logger, mpath: str):
+        self._log = log
+        self._path = mpath
+        self._session = _HttpsSession()
+        self._metadata: dict[str, dict] = {}
+        self._weight_paths: dict[str, str] = {}
+        self._handlers: dict[tuple, Callable] = {}
+
+    def close(self) -> None:
+        self._session.close()
+
+    def _resolve(self, model: str) -> tuple[bool, str, str, str]:
+        """Return (is_relative_id, model_id, meta_path, weight_path)."""
+        if path.isabs(model):
+            return False, model, f'{model}.json', f'{model}.pb'
+
+        if self._path == 'auto':
+            home = Path.home() / 'essentia'
+            model_path = path.join(home, model)
         else:
-            log.info(f'Retrying ({attempt}/{retries}): {label_display}')
+            model_path = path.join(self._path, model)
 
-        try:
-            _attempt()
+        return True, model, f'{model_path}.json', f'{model_path}.pb'
+
+    @staticmethod
+    def embedding_model_id(metadata: dict | None) -> str | None:
+        if not metadata:
+            return None
+        inference = metadata.get('inference') or {}
+        embedding = inference.get('embedding_model')
+        if not embedding:
+            return None
+        link = embedding.get('link', '')
+        return link.replace(MODELS_BASE_URL, '').replace('.pb', '') or None
+
+    def ensure(self, model: str | None) -> tuple[str | None, dict | None]:
+        """Ensure model files exist on disk; return (weight_path, metadata)."""
+        if not model:
+            return None, None
+
+        if model in self._weight_paths and model in self._metadata:
+            return self._weight_paths[model], self._metadata[model]
+
+        is_relative, model_id, meta_path, weight_path = self._resolve(model)
+        Path(os.path.dirname(meta_path) or '.').mkdir(parents=True, exist_ok=True)
+
+        if not path.isfile(meta_path):
+            if not is_relative:
+                raise UserError(f'Model metadata not found: {meta_path}')
+            self._log.info(f'Downloading model: {model_id}.json')
+            _download(
+                f'{MODELS_BASE_URL}{model_id}.json',
+                meta_path,
+                f'{model_id}.json',
+                self._log,
+                session=self._session,
+            )
+
+        with open(meta_path, 'r') as metadata_file:
+            metadata = json.load(metadata_file)
+
+        if not path.isfile(weight_path):
+            if not is_relative and not metadata.get('link'):
+                raise UserError(f'Model weights not found: {weight_path}')
+            weight_url = metadata.get('link') or f'{MODELS_BASE_URL}{model_id}.pb'
+            self._log.info(f'Downloading model: {model_id}.pb')
+            _download(
+                weight_url,
+                weight_path,
+                f'{model_id}.pb',
+                self._log,
+                session=self._session,
+            )
+
+        self._metadata[model] = metadata
+        self._weight_paths[model] = weight_path
+        # Also cache under resolved id when they differ.
+        self._metadata[model_id] = metadata
+        self._weight_paths[model_id] = weight_path
+        return weight_path, metadata
+
+    def prefetch(self, models: list[str | None]) -> None:
+        """Download all configured models (and embedding deps) before TF load."""
+        pending: list[str] = []
+        seen: set[str] = set()
+        for model in models:
+            if model and model not in seen:
+                pending.append(model)
+                seen.add(model)
+
+        if not pending:
             return
-        except (TimeoutError, urllib.error.URLError, OSError) as exc:
-            last_error = exc
-            _cleanup_partial()
-            if attempt < retries:
-                # Brief backoff; essentia.upf.edu TLS handshakes are flaky.
-                time.sleep(2 * attempt)
-                continue
-            break
 
-    raise UserError(
-        f'Failed to download model {label_display} after {retries} attempts: {last_error}'
-    )
+        self._log.info(f'Ensuring {len(pending)} model(s) are available…')
+        idx = 0
+        while idx < len(pending):
+            model = pending[idx]
+            idx += 1
+            _, metadata = self.ensure(model)
+            embedding_id = self.embedding_model_id(metadata)
+            if embedding_id and embedding_id not in seen:
+                pending.append(embedding_id)
+                seen.add(embedding_id)
+
+        # Drop the HTTP session before long-lived TF graphs hold memory.
+        self.close()
+
+    def get_handler(
+            self,
+            weight_path: str,
+            metadata: dict,
+            *,
+            embedding: bool = False,
+    ) -> Callable:
+        inputs = metadata['schema']['inputs']
+        outputs = metadata['schema']['outputs']
+        handler_class = metadata['inference']['algorithm']
+        handler_in = next((entry['name'] for entry in inputs), None)
+        if embedding:
+            handler_out = next(
+                (
+                    entry['name'] for entry in outputs
+                    if entry.get('output_purpose') == 'embeddings'
+                ),
+                None,
+            )
+        else:
+            handler_out = next(
+                (
+                    entry['name'] for entry in outputs
+                    if entry.get('output_purpose') == 'predictions'
+                ),
+                None,
+            )
+
+        cache_key = (weight_path, handler_class, handler_in, handler_out, embedding)
+        if cache_key in self._handlers:
+            return self._handlers[cache_key]
+
+        self._log.info(f'Loading model: {path.basename(weight_path)}')
+        algo = getattr(es, handler_class)
+        if handler_in and handler_out:
+            handler = algo(graphFilename=weight_path, input=handler_in, output=handler_out)
+        elif handler_in:
+            handler = algo(graphFilename=weight_path, input=handler_in)
+        elif handler_out:
+            handler = algo(graphFilename=weight_path, output=handler_out)
+        else:
+            handler = algo(graphFilename=weight_path)
+
+        self._handlers[cache_key] = handler
+        return handler
 
 
 class EssentiaModel:
@@ -115,117 +363,34 @@ class EssentiaModel:
             log: Logger,
             mpath: str,
             config: ConfigView,
-            name: str
+            name: str,
+            repo: ModelRepository | None = None,
     ):
         self.name = name
         self.config = config
         self._log = log
         self._path = mpath
+        self._repo = repo or ModelRepository(log, mpath)
 
-        model_weight_file, model_metadata = self._load(self.config['model'].get(str))
+        model_weight_file, model_metadata = self._repo.ensure(self.config['model'].get(str))
         self._model = model_weight_file
         self.model_metadata = model_metadata
 
-        embedding_model = (self.model_metadata['inference']['embedding_model']['link']
-                           .replace('https://essentia.upf.edu/models/', '')
-                           .replace('.pb', '')) \
-            if 'embedding_model' in self.model_metadata['inference'] else None
-        model_weight_file, model_metadata = self._load(embedding_model)
+        embedding_model = self._repo.embedding_model_id(self.model_metadata)
+        model_weight_file, model_metadata = self._repo.ensure(embedding_model)
         self._embedding_model = model_weight_file
         self.embedding_model_metadata = model_metadata
 
-        handler, embedding_handler = self._load_handlers()
-        self._handler = handler
-        self._embedding_handler = embedding_handler
-
-    def _get_handler_input(self, embedding: bool = False) -> str|None:
-        if embedding:
-            return next(
-                (entry['name'] for entry in self.embedding_model_metadata['schema']['inputs']),
-                None
-            )
-
-        return next(
-            (entry['name'] for entry in self.model_metadata['schema']['inputs']),
-            None
+        self._handler = self._repo.get_handler(
+            self._model, self.model_metadata, embedding=False
         )
-
-    def _get_handler_output(self, embedding: bool = False) -> str|None:
-        if embedding:
-            return next(
-                (entry['name'] for entry in self.embedding_model_metadata['schema']['outputs'] if entry['output_purpose'] == 'embeddings'),
-                None
+        self._embedding_handler = (
+            self._repo.get_handler(
+                self._embedding_model, self.embedding_model_metadata, embedding=True
             )
-
-        return next(
-            (entry['name'] for entry in self.model_metadata['schema']['outputs'] if entry['output_purpose'] == 'predictions'),
-            None
+            if self._embedding_model and self.embedding_model_metadata
+            else None
         )
-
-    def _load_handler(self, embedding: bool = False) -> Callable|None:
-        model = self._embedding_model if embedding else self._model
-        if model is None:
-            return None
-
-        handler_class = self.model_metadata['inference']['algorithm'] \
-            if not embedding else self.embedding_model_metadata['inference']['algorithm']
-
-        handler_in = self._get_handler_input(embedding)
-        handler_out = self._get_handler_output(embedding)
-
-        if handler_in and handler_out:
-            return getattr(es, handler_class)(graphFilename=model, input=handler_in, output=handler_out)
-        if handler_in:
-            return getattr(es, handler_class)(graphFilename=model, input=handler_in)
-        if handler_out:
-            return getattr(es, handler_class)(graphFilename=model, output=handler_out)
-
-        return getattr(es, handler_class)(graphFilename=model)
-
-    def _load_handlers(self) -> tuple[Callable, Callable|None]:
-        return self._load_handler(), self._load_handler(embedding=True)
-
-    def _load(self, model: str|None) -> tuple[str|None, dict|None]:
-        if not model:
-            return None, None
-
-        model_path = model
-        is_path = path.isabs(model_path)
-
-        if not is_path:
-            if self._path == 'auto':
-                home = Path.home() / 'essentia'
-                home_base = Path(os.path.dirname(home / model_path))
-                if not home_base.exists():
-                    home_base.mkdir(parents=True)
-                model_path = path.join(home, model_path)
-            else:
-                model_path = path.join(self._path, model_path)
-
-        meta_file = f'{model}.json'
-        meta_file_path = f'{model_path}.json'
-
-        if not path.isfile(meta_file_path):
-            self._log.info(f'Downloading model: {meta_file}')
-            _download(
-                f'https://essentia.upf.edu/models/{meta_file}',
-                meta_file_path,
-                meta_file,
-                self._log,
-            )
-
-        metadata_file = open(meta_file_path, 'r')
-        metadata = json.load(metadata_file)
-        metadata_file.close()
-
-        weight_file = f'{model}.pb'
-        weight_file_path = f'{model_path}.pb'
-
-        if not path.isfile(weight_file_path):
-            self._log.info(f'Downloading model: {weight_file}')
-            _download(metadata['link'], weight_file_path, weight_file, self._log)
-
-        return weight_file_path, metadata
 
     def sample_rate(self) -> int:
         return self.model_metadata['inference']['sample_rate']
@@ -236,15 +401,17 @@ class EssentiaModel:
     def analyze(self, embedding):
         return self._handler(embedding)
 
+
 class BPMModel(EssentiaModel):
     def __init__(
             self,
             log: Logger,
             mpath: str,
             config: ConfigView,
-            name: str
+            name: str,
+            repo: ModelRepository | None = None,
     ):
-        super().__init__(log, mpath, config, name)
+        super().__init__(log, mpath, config, name, repo=repo)
 
     def analyze(self, embedding) -> tuple[float, list[float], list[float]]:
         return super().analyze(embedding)
@@ -258,6 +425,7 @@ class MoodModelType(Enum):
     sad = 'sad'
     mirex = 'mirex'
     jamendo = 'jamendo'
+
 
 class MoodPrediction:
     def __init__(self, moods: set[str], confidence: float, mtype: MoodModelType):
@@ -277,15 +445,17 @@ class MoodPrediction:
     def __str__(self) -> str:
         return f'{self.moods} / {self.confidence}'
 
+
 class MoodModel(EssentiaModel):
     def __init__(
             self,
             log: Logger,
             mpath: str,
             config: ConfigView,
-            name: str
+            name: str,
+            repo: ModelRepository | None = None,
     ):
-        super().__init__(log, mpath, config, name)
+        super().__init__(log, mpath, config, name, repo=repo)
         self.model_type = MoodModelType(self.name)
         self._moods = self._get_moods()
 
@@ -327,6 +497,10 @@ class EssentiaInterface:
         self._force: bool = config['force'].get(bool)
         self._write: bool = config['write'].get(bool)
 
+        model_folder = self._config['path'].get(str)
+        self._repo = ModelRepository(self._logger, model_folder)
+        self._repo.prefetch(self._configured_model_ids())
+
         self._bpm_model = self._load_bpm_model()
         self._mood_models = self._load_mood_models()
         self._store_lock = threading.Lock()
@@ -335,6 +509,16 @@ class EssentiaInterface:
         if not self._quiet:
             self._logger.info(msg)
 
+    def _configured_model_ids(self) -> list[str]:
+        ids: list[str] = []
+        if self._config['tags']['bpm']['enabled'].get(bool):
+            ids.append(self._config['tags']['bpm']['model'].get(str))
+        if self._config['tags']['mood']['enabled'].get(bool):
+            for _mood_name, mood in self._config['tags']['mood']['moods'].items():
+                if mood['enabled'].get(bool):
+                    ids.append(mood['model'].get(str))
+        return ids
+
     def _load_bpm_model(self) -> BPMModel|None:
         model_folder = self._config['path'].get(str)
         if self._config['tags']['bpm']['enabled'].get(bool):
@@ -342,7 +526,8 @@ class EssentiaInterface:
                 self._logger,
                 model_folder,
                 self._config['tags']['bpm'],
-                'bpm'
+                'bpm',
+                repo=self._repo,
             )
 
         return None
@@ -358,7 +543,8 @@ class EssentiaInterface:
                         self._logger,
                         model_folder,
                         mood,
-                        mood_name
+                        mood_name,
+                        repo=self._repo,
                     ))
 
         return models
@@ -396,16 +582,21 @@ class EssentiaInterface:
             item['mood'] = None
 
         separator = self._config['tags']['mood']['separator'].get(str)
+        # Reuse embeddings when multiple heads share the same embedder + sample rate.
+        embedding_cache: dict[tuple[str | None, int], object] = {}
 
         for model in self._mood_models:
-            loader.configure(
-                filename=item.path.decode('utf-8'),
-                sampleRate=model.sample_rate(),
-                resampleQuality=4
-            )
-            audio = loader()
-            embedding = model.embed(audio)
-            predictions = model.analyze(embedding)
+            emb_key = (model._embedding_model, model.sample_rate())
+            if emb_key not in embedding_cache:
+                loader.configure(
+                    filename=item.path.decode('utf-8'),
+                    sampleRate=model.sample_rate(),
+                    resampleQuality=4
+                )
+                audio = loader()
+                embedding_cache[emb_key] = model.embed(audio)
+
+            predictions = model.analyze(embedding_cache[emb_key])
 
             for p in predictions:
                 if len(p.moods) == 0:
