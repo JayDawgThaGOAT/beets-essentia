@@ -472,6 +472,29 @@ class MoodModel(EssentiaModel):
 
         return set(mood.get() for mood in self.config['mapping'].sequence())
 
+    def _positive_class_index(self) -> int:
+        """Index of the positive Laurier class in model softmax output.
+
+        Metadata order is inconsistent: aggressive/happy put the positive label
+        first; party/relaxed/sad put non_*/not_* first.
+        """
+        classes = self.model_metadata.get('classes') or []
+        if not classes:
+            return 0
+
+        mapped = {str(m).lower() for m in self._moods}
+        for idx, label in enumerate(classes):
+            name = str(label).lower()
+            if name in mapped:
+                return idx
+
+        for idx, label in enumerate(classes):
+            name = str(label).lower()
+            if not (name.startswith('non_') or name.startswith('not_')):
+                return idx
+
+        return 0
+
     def analyze(self, embedding) -> list[MoodPrediction]:
         predictions = super().analyze(embedding)
 
@@ -481,7 +504,8 @@ class MoodModel(EssentiaModel):
             category_confidence = [i / sum_count for i in sum_categories]
             return [MoodPrediction(set(moods), category_confidence[idx], self.model_type) for idx, moods in enumerate(self._moods) if moods is not None]
 
-        predictions_positive = [entry[0] for entry in predictions]
+        positive_idx = self._positive_class_index()
+        predictions_positive = [entry[positive_idx] for entry in predictions]
         confidence = sum(predictions_positive) / len(predictions_positive)
         return [MoodPrediction(self._moods, confidence, self.model_type)]
 
