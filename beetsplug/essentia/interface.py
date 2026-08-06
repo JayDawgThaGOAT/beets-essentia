@@ -21,6 +21,8 @@ from confuse import ConfigView, ConfigTypeError
 
 import essentia.standard as es
 
+from beetsplug.essentia.openl3 import EmbeddingsOpenL3, openl3_n_mels
+
 MODELS_BASE_URL = 'https://essentia.upf.edu/models/'
 
 
@@ -320,6 +322,24 @@ class ModelRepository:
         inputs = metadata['schema']['inputs']
         outputs = metadata['schema']['outputs']
         handler_class = metadata['inference']['algorithm']
+
+        if handler_class == 'N/A':
+            if metadata.get('name') == 'OpenL3' and embedding:
+                n_mels = openl3_n_mels(metadata)
+                cache_key = (weight_path, 'OpenL3', n_mels, embedding)
+                if cache_key in self._handlers:
+                    return self._handlers[cache_key]
+                self._log.info(f'Loading model: {path.basename(weight_path)}')
+                handler = EmbeddingsOpenL3(weight_path, n_mels=n_mels)
+                self._handlers[cache_key] = handler
+                return handler
+            raise UserError(
+                f'Unsupported model algorithm N/A for '
+                f'{path.basename(weight_path)} '
+                f'(name={metadata.get("name")!r}). '
+                f'OpenL3 embeddings are supported; other N/A models are not.'
+            )
+
         handler_in = next((entry['name'] for entry in inputs), None)
         if embedding:
             handler_out = next(
@@ -393,6 +413,9 @@ class EssentiaModel:
         )
 
     def sample_rate(self) -> int:
+        # Prefer embedding-model rate (OpenL3 is 48 kHz; heads often advertise 16 kHz).
+        if self.embedding_model_metadata:
+            return self.embedding_model_metadata['inference']['sample_rate']
         return self.model_metadata['inference']['sample_rate']
 
     def embed(self, audio):

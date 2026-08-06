@@ -249,6 +249,23 @@ essentia:
               - uplifting
 ```
 
+### OpenL3 and Laurier mood heads
+
+Laurier binary mood heads (`aggressive`, `happy`, `party`, `relaxed`, `sad`) can use several embedding backbones from the [Essentia models](https://essentia.upf.edu/models.html) page (VGGish, YAMNet, MusiCNN, Discogs-EffNet, OpenL3). Point each mood `model` at the matching classification head, for example:
+
+```yaml
+sad:
+  enabled: yes
+  threshold: 0.2
+  mapping:
+    - sad
+  model: "classification-heads/mood_sad/mood_sad-openl3-music-mel128-emb512-1"
+```
+
+OpenL3 feature extractors ship with `algorithm: N/A` (no dedicated Essentia predictor). This plugin embeds Pablo Alonso’s OpenL3 mel + `TensorflowPredict` pipeline ([gist](https://gist.github.com/palonso/cfebe37e5492b5a3a31775d8eae8d9a8)) so those heads work. OpenL3 runs at **48 kHz** and is slower than MusiCNN / EffNet / VGGish.
+
+Binary Laurier heads resolve the positive softmax class from each model’s `classes` metadata (so `party` / `relaxed` / `sad`, which list `non_*` first, are not scored from the wrong index).
+
 ## Usage
 
 Invoke the plugin as:
@@ -291,6 +308,8 @@ These command line options will override those specified in the configuration fi
 ## Credits
 
 Essentia is an open-source C++ library with Python bindings for audio analysis and audio-based music information retrieval. It is released under the Affero GPLv3 license and is also available under proprietary license upon request. This plugin is just a mere wrapper around this library. [Learn more about the Essentia project](http://essentia.upf.edu)
+
+OpenL3 embedding support adapts [extract-openl3-embeddings.py](https://gist.github.com/palonso/cfebe37e5492b5a3a31775d8eae8d9a8) by Pablo Alonso (MTG / Essentia).
 
 ## References
 
