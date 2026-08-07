@@ -5,6 +5,7 @@ import essentia
 essentia.log.infoActive = False
 
 import mediafile
+from beets.dbcore import types
 from beets.importer import ImportTask
 from beets.plugins import BeetsPlugin
 from beets.ui import Subcommand
@@ -15,6 +16,8 @@ from beetsplug.essentia.command import EssentiaCommand
 
 class EssentiaPlugin(BeetsPlugin):
     _default_plugin_config_file_name_ = 'config_default.yml'
+    # Fixed column so beet update can store mood (beets #5580 flex media-field bug).
+    item_types = {"mood": types.STRING}
 
     def __init__(self) -> None:
         super(EssentiaPlugin, self).__init__()
