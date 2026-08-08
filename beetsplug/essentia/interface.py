@@ -7,14 +7,16 @@ import threading
 import time
 import urllib.error
 from concurrent import futures
+from contextlib import nullcontext
 from enum import Enum
 from logging import DEBUG, Logger
 from os import path
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 from urllib.parse import urljoin, urlparse
 
 import numpy as np
+from beets import context
 from beets.library import Item
 from beets.ui import UserError
 from confuse import ConfigView, ConfigTypeError
@@ -736,7 +738,21 @@ class EssentiaInterface:
         self._analyze_mood(loader, item)
         self._persist_item(item)
 
-    def analyse(self, items: list[Item]) -> None:
+    def analyse(self, items: Iterable[Item]) -> None:
+        # Materialize on this thread so PathType.from_sql expands relative DB
+        # paths with beets' music_dir ContextVar. ThreadPoolExecutor workers do
+        # not inherit that context, which previously made item.path relative
+        # and caused false "not found!" errors.
+        items = list(items)
+        music_dir = context.get_music_dir()
+
+        def _run(item: Item) -> None:
+            # Keep music_dir bound so item.store()/try_write() still normalize
+            # paths relative to the library directory.
+            cm = context.music_dir(music_dir) if music_dir else nullcontext()
+            with cm:
+                self._analyse_item(item)
+
         with futures.ThreadPoolExecutor(max_workers=self._max_threads) as executor:
             # Exhaust the iterator so work completes before the pool shuts down.
-            list(executor.map(self._analyse_item, items))
+            list(executor.map(_run, items))

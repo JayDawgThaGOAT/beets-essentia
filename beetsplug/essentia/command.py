@@ -108,7 +108,7 @@ class EssentiaCommand(Subcommand):
 
     def analyse(self, count_only: bool, force: bool):
         self.find_items_to_analyse(force)
-        self.log.info("Number of items to be analysed: {}".format(len(self.items_to_analyse)), False)
+        self.log.info("Number of items to be analysed: {}".format(len(self.items_to_analyse)))
 
         # Count only and exit
         if count_only:
@@ -139,8 +139,8 @@ class EssentiaCommand(Subcommand):
 
         self.log.debug("Combined query: {}".format(combined_query))
 
-        # Get the library items
-        self.items_to_analyse = self.lib.items(combined_query, parsed_sort)
+        # Materialize on the CLI thread so path expansion sees music_dir.
+        self.items_to_analyse = list(self.lib.items(combined_query, parsed_sort))
         if len(self.items_to_analyse) == 0:
             self.log.info("No items to process")
             return
